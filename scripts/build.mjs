@@ -11,7 +11,8 @@ const copy=(src,dst)=>{if(!fs.existsSync(src))throw Error('Missing build asset: 
 copy(path.join(root,'node_modules','tesseract.js','dist','tesseract.min.js'),path.join(ocr,'tesseract.min.js'));
 copy(path.join(root,'node_modules','tesseract.js','dist','worker.min.js'),path.join(ocr,'worker.min.js'));
 const core=path.join(root,'node_modules','tesseract.js-core');
-for(const f of fs.readdirSync(core).filter(f=>/^tesseract-core.*\\.(wasm|js)$/.test(f)))copy(path.join(core,f),path.join(ocr,f));
+for(const f of fs.readdirSync(core).filter(f=>/^tesseract-core.*\.(wasm|js)$/.test(f)))copy(path.join(core,f),path.join(ocr,f));
+if(!fs.readdirSync(ocr).some(f=>f.startsWith('tesseract-core')&&f.endsWith('.wasm.js')))throw Error('OCR WASM core files missing');
 copy(path.join(root,'assets','eng.traineddata'),path.join(ocr,'eng.traineddata'));
 console.log('Chrome extension and offline OCR assets written to dist/');
 
