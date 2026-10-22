@@ -147,3 +147,9 @@ npm run build
 ```
 
 The build packages `assets/eng.traineddata` locally. Do not commit the downloaded model or user PDFs. Tests call the production matcher and clean-export functions using synthetic documents. Theme changes preserve the v0.4 two-worker OCR, embedded-text shortcut, lazy page previews, page navigation and clean export. No new speed or tab-discard reliability claim is made.
+
+### If selecting a PDF does nothing
+
+Load the **built `dist/` directory**, not this source directory: both contain a manifest, but only `dist/` contains the bundled PDF libraries. After replacing a build, reload the extension at `chrome://extensions` and open a fresh viewer tab. The viewer now reports module startup failures instead of silently leaving file selection disconnected.
+
+Import current PDF URL supports direct HTTP(S) and local `file://` PDF tabs. For local-tab import, Chrome requires **Allow access to file URLs** on the extension’s Details page. Choosing a saved PDF in the viewer does not require that setting. Embedded/blob PDF viewers and protected portal pages may not expose a downloadable URL; save the PDF and choose it locally instead.

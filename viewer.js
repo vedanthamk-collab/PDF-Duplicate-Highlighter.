@@ -1,3 +1,4 @@
+import {pdfSource} from './pdf-source.js';
 import {recognizeAll as runOcr} from './scanner.js';
 import {findDuplicates} from './matcher.js';
 import {createCleanPdf} from './export.js';
@@ -14,7 +15,7 @@ const mode=()=>MODE[Number($('threshold').value)];
 $('threshold').oninput=()=>{$('thresholdLabel').textContent=mode().name;};
 $('threshold').onchange=()=>{if(state.signatures.length)classify();};
 $('possible').onchange=renderMarks;
-$('file').onchange=async e=>{const f=e.target.files?.[0];if(f)await openPdf(await f.arrayBuffer(),f.name);e.target.value='';};
+$('file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;status('Opening '+f.name+'…');try{await openPdf(await f.arrayBuffer(),f.name);}catch(err){status('Unable to read selected file: '+err.message);}finally{e.target.value='';}};
 $('rescan').onclick=()=>scan();
 $('jumpForm').onsubmit=e=>{e.preventDefault();const n=Number($('jump').value);if(!Number.isInteger(n)||n<1||n>cards.size){$('jumpStatus').textContent='Enter a page from 1 to '+cards.size;return;}cards.get(n).scrollIntoView({behavior:'smooth',block:'start'});$('jumpStatus').textContent='Page '+n+' of '+cards.size;};
 $('export').onclick=downloadClean;
@@ -23,7 +24,7 @@ function status(message){$('progress').textContent=message;}
 const params=new URLSearchParams(location.search);
 if(params.has('source')){
  const url=params.get('source');status('Importing PDF link…');
- try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw Error('Unsupported URL');const r=await fetch(u.toString(),{credentials:'include'});if(!r.ok)throw Error('HTTP '+r.status);await openPdf(await r.arrayBuffer(),decodeURIComponent(u.pathname.split('/').pop()||'portal.pdf'));}
+ try{const u=new URL(pdfSource(url));const r=await fetch(u.toString(),{credentials:'include'});if(!r.ok)throw Error('HTTP '+r.status);await openPdf(await r.arrayBuffer(),decodeURIComponent(u.pathname.split('/').pop()||'portal.pdf'));}
  catch(e){status('Portal import failed: '+e.message+'. Download that PDF from the portal and choose it here.');}
 }
 async function openPdf(data,name){
