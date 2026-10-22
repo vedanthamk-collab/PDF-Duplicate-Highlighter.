@@ -1,1 +1,28 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PDF Duplicate Highlighter</title><link rel="stylesheet" href="viewer.css"></head><body><header><div><strong>PDF Duplicate Highlighter</strong><small>First occurrence stays original · remove later confirmed duplicate pages on export</small></div><div class="controls"><label class="filebtn">Choose PDF<input id="file" type="file" accept=".pdf,application/pdf" hidden></label><form id="jumpForm" class="jumpform"><label for="jump">Page</label><input id="jump" type="number" min="1" step="1" placeholder="e.g. 80" aria-label="Go to page number"><button type="submit">Go ↵</button></form><span id="jumpStatus" class="jumpStatus" aria-live="polite"></span><button id="rescan" disabled>Rescan</button><button id="export" disabled>Download PDF without duplicates</button></div></header><main><aside><h2>Scan results</h2><div id="stats">Select a PDF to begin.</div><div class="hint">High-accuracy mode: checks both scanned text and document identifiers. No repeated approval questions. When evidence is insufficient, pages remain unmarked.</div><input id="threshold" type="hidden" value="0"><input id="possible" type="checkbox" hidden checked><b id="thresholdLabel" hidden></b><div id="progress"></div><h3>Duplicates</h3><div id="matches"></div><div class="hint">Original PDF is never modified. Only confirmed duplicates are removed from the downloaded copy.</div></aside><section id="stage"><div id="placeholder">Open a PDF to scan for duplicate pages.</div><div id="pages"></div></section></main><script src="vendor/pdf-lib.min.js"></script><script src="vendor/ocr/tesseract.min.js"></script><script type="module" src="viewer.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PDF Duplicate Highlighter</title><link rel="stylesheet" href="viewer.css"></head>
+<body>
+<header>
+ <div class="identity"><span class="brand-icon" aria-hidden="true">≋</span><div><strong>PDF Duplicate Highlighter</strong><small>A little less paperwork. A lot more clarity.</small></div></div>
+ <span class="local-badge">● Processed on your device</span>
+</header>
+<nav class="toolbar" aria-label="Document tools">
+ <div class="document-tools"><label class="filebtn" for="file">Choose PDF <span aria-hidden="true">↗</span></label><input id="file" class="visually-hidden" type="file" accept=".pdf,application/pdf"><button id="rescan" class="secondary" disabled>Rescan</button></div>
+ <div class="controls"><form id="jumpForm" class="jumpform"><label for="jump">Jump to page</label><input id="jump" type="number" min="1" step="1" placeholder="e.g. 80" aria-label="Go to page number"><button class="secondary" type="submit">Go ↵</button></form><span id="jumpStatus" class="jumpStatus" aria-live="polite"></span><button id="export" disabled>Download PDF without duplicates</button></div>
+</nav>
+<main>
+ <aside aria-label="Scan results">
+  <div class="eyebrow">DOCUMENT WORKSPACE</div><h2>Every page, accounted for.</h2>
+  <div id="stats" role="status">Select a PDF to begin.</div>
+  <div class="hint">Conservative matching checks text and document identifiers. Pages with insufficient evidence stay in your PDF.</div>
+  <input id="threshold" type="hidden" value="0"><input id="possible" type="checkbox" hidden checked><b id="thresholdLabel" hidden></b>
+  <div id="progress" role="status" aria-live="polite"></div>
+  <h3>Duplicate pages</h3><div id="matches">Your results will appear here after scanning.</div>
+  <div class="privacy-note"><strong>Your original stays yours.</strong><p>Review each match before downloading. The clean copy removes confirmed duplicates, keeps the earliest original, and adds no marks.</p></div>
+  <p class="hint">Keep this viewer open until scanning finishes. Chrome may pause or discard inactive tabs.</p>
+  <footer>Plum-inspired palette · Independent project.<br>Not affiliated with or endorsed by Plum.</footer>
+ </aside>
+ <section id="stage" aria-label="PDF preview"><div id="placeholder"><div class="paper-art" aria-hidden="true"><span>01</span><i></i><i></i><i></i></div><div class="eyebrow">LESS REPETITION. MORE CLARITY.</div><h1>Make room for<br>the pages that matter.</h1><p>Choose a PDF above to find repeated pages<br>and download a clean, ordered copy.</p><span class="empty-note">Local processing · Offline English OCR · Original untouched</span></div><div id="pages"></div></section>
+</main>
+<script src="vendor/pdf-lib.min.js"></script><script src="vendor/ocr/tesseract.min.js"></script><script type="module" src="viewer.js"></script>
+</body></html>
