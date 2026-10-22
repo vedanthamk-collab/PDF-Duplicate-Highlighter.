@@ -47,3 +47,11 @@ Pages are rendered at reduced scale for comparison. Each page's normalized grays
 This version prioritizes avoiding false positives, so scanned copies with changed lighting or perspective may only appear as review candidates or may be missed altogether. OCR is **not** included: scanned text may not be available for content-level comparison, and visually similar forms with different small numbers must always be checked manually. If identical forms vary significantly in capture angle, add geometric alignment/OCR in a later version.
 
 Creating a downloadable annotated PDF from a large scan (e.g. 100+ MB) requires substantial browser memory. Export annotates pages using source page coordinates and is not a substitute for checking each match. The original document is never overwritten.
+
+## Version 0.3 (offline OCR + low-interruption auto-detection)
+
+This revision replaces the high-volume review queue with **one automatic high-confidence duplicate list**. It bundles Tesseract.js and an English OCR model into the extension during the GitHub Actions build (the model is never fetched while processing PDFs). No documents or medical records are uploaded. OCR may add substantial processing time for large PDFs.
+
+The matcher requires both document identity (when readable, such as invoice or patient/report number) and significant OCR word/number overlap. Pages with insufficient evidence are **not marked**. Report forms containing common headers alone are not enough to confirm a duplicate. The system is deliberately conservative and can miss fuzzy or very faint duplicate scans. Manually inspect any unmarked pages you still suspect are repeated.
+
+The extension does **not** guarantee perfect accuracy. In particular: faint carbon-copy pharmacy pages, rotated scans, heavy camera shadows, and images of near-identical forms can require more advanced alignment and document field extraction. The page-jump and annotated PDF export remain available.
