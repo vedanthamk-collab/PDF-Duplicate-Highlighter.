@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false};
 const cards=new Map();
 let pageObserver=null;
-const sleepFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+// Scanner does not await requestAnimationFrame: browsers suspend it in hidden tabs.
 const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
 $('threshold').value='0';
 const mode=()=>MODE[Number($('threshold').value)];
@@ -245,8 +245,7 @@ async function scan(){
    sig.embedded=sig.ocr.trim().length>80;
    state.signatures.push(sig);
    mini.width=0;mini.height=0;
-   // Yield for interaction without timer-based pauses.
-   if(n%6===0)await sleepFrame();
+   // Do not wait for animation frames: they pause when the tab is hidden.
   }catch(err){status('Could not prepare page '+n+': '+err.message);console.error(err);return;}
  }
  if(run!==state.run)return;
@@ -260,7 +259,7 @@ async function downloadClean(){
  const duplicates=[...new Set(state.matches.map(m=>m.page))].sort((a,b)=>a-b);
  if(!duplicates.length){status('No confirmed duplicates to remove. Source PDF is already the clean version.');return;}
  const shown=duplicates.length<=16?duplicates.join(', '):duplicates.slice(0,16).join(', ')+', …';
- const ok=confirm('Create a NEW PDF without '+duplicates.length+' marked duplicate page(s)?\\nPages to remove: '+shown+'\\n\\nThe original PDF will not be changed. Please verify these matches first.');
+ const ok=confirm('Create a NEW PDF without '+duplicates.length+' marked duplicate page(s)?\\nPages to remove: '+shown+'\n\nThe original PDF will not be changed. Please verify these matches first.');
  if(!ok)return;
  const button=$('export');button.disabled=true;
  try{
@@ -271,7 +270,7 @@ async function downloadClean(){
   for(const n of duplicates.slice().reverse())pdf.removePage(n-1);
   const data=await pdf.save({useObjectStreams:true});
   const blob=new Blob([data],{type:'application/pdf'}),url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\\.pdf$/i,'')+'-without-duplicates.pdf';
+  const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\.pdf$/i,'')+'-without-duplicates.pdf';
   document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),120000);
   status('Clean PDF downloaded: '+(state.pdf.numPages-duplicates.length)+' pages retained. Original unchanged.');
