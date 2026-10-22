@@ -212,7 +212,7 @@ async function scan(){
    $('pages').append(card);cards.set(n,card);page.cleanup();
   }catch(e){status('Error at page '+n+': '+e.message);console.error(e);return;}
  }
- if(run!==state.run)return;await recognizeAll(run);if(run!==state.run)return;classify();status('Analysis finished. Only high-confidence duplicates are labeled; unverified pages remain unmarked.');
+ if(run!==state.run)return;await recognizeAll(run);if(run!==state.run)return;classify();status(state.ocrReady?'Analysis finished. Only high-confidence duplicates are labeled; unverified pages remain unmarked.':'OCR could not start. No automatic duplicates were confirmed; check the browser console and reload this extension.');
 }
 async function downloadAnnotated(){
  if(!state.pdf||!state.bytes)return;
