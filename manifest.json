@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "PDF Duplicate Highlighter",
+  "version": "0.1.0",
+  "description": "Find and mark duplicate PDF pages locally, preserving the first occurrence.",
+  "permissions": [
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "icons": {}
+}
