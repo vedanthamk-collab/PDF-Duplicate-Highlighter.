@@ -131,6 +131,7 @@ function initVirtualPages(run){
 }
 async function scan(){
  if(!state.pdf)return;
+ const started=performance.now();
  const run=++state.run;pageObserver?.disconnect();cards.clear();
  state.signatures=[];state.matches=[];state.possible=[];state.ocrReady=false;
  $('pages').replaceChildren();$('matches').replaceChildren();$('rescan').disabled=true;$('export').disabled=true;
@@ -155,7 +156,7 @@ async function scan(){
  await recognizeAll(run);
  if(run!==state.run)return;
  classify();
- status('Analysis complete. Review the duplicates list before downloading the cleaned PDF.');
+ status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+' seconds. Review the duplicates list before downloading the cleaned PDF.');
 }
 async function downloadClean(){
  if(!state.pdf||!state.bytes)return;

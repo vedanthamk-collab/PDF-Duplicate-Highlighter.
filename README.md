@@ -157,3 +157,18 @@ Import current PDF URL supports direct HTTP(S) and local `file://` PDF tabs. For
 `npm run build` also provisions the ignored `vendor/` directory beside the source manifest. This supports existing unpacked installations loaded from the source folder; `dist/` remains the recommended distributable. Neither location can run before its bundled assets have been built.
 
 Verified in Chrome on 22 October 2026: the existing unpacked source-folder installation failed with `ERR_FILE_NOT_FOUND` for PDF.js, PDF-lib and Tesseract. After building the generated libraries into that folder and reloading the extension, the viewer reached Ready; selecting a synthetic three-page PDF rendered the document and completed analysis with two duplicates referring to page 1. This verifies the local file-selection path; tab-discard recovery and protected portal imports are not covered by this check.
+
+## Background rendering fix and measured performance (22 October 2026)
+
+PDF.js 4.10.38 internally schedules display rendering with `requestAnimationFrame`. Removing animation-frame waits from the viewer alone did not remove this dependency: thumbnail preparation and OCR-image rendering could stall in a hidden Chrome tab. The build now applies one guarded change to the bundled PDF.js scheduler, using its existing promise-based continuation for display rendering. Display intent, annotations, optional layers, page scales, OCR resolution and matching thresholds are unchanged. A future PDF.js upgrade must explicitly review the patch if the expected scheduling point changes.
+
+Measured in the user's installed Chrome, using identical generated 24-page PDFs at scale 0.75:
+
+| Rendering case | Before | Updated | Evidence |
+| --- | --- | --- | --- |
+| Foreground, median of 3 alternating runs | 517 ms | 401 ms | About 22% less rendering time; raw runs before 503/577/517, updated 401/405/343 ms |
+| Hidden tab, one paired run | 33,209 ms | 1,056 ms | Both started hidden. Updated completed all 24 pages while hidden; baseline completed 0 pages while hidden and finished after tab restoration |
+
+These timings cover rendering only, excluding OCR, matching and export. They do not establish a 2x end-to-end speedup on arbitrary scans. The hidden baseline time depends on how long the tab remains hidden. OCR-heavy documents can still take substantial time. The viewer now reports total elapsed scan time on completion. Chrome tab discard, browser shutdown and memory pressure remain limitations; this change does not introduce a persistent scanning service.
+
+To reproduce: run `npm run build`, then `node scripts/prepare-render-benchmark.mjs`. From the source-folder unpacked extension, open `chrome-extension://<extension-id>/benchmarks/render.html`. Foreground runs alternate engine order; the hidden test starts both engines on the actual visibility transition. Switch away, wait about 15 seconds, then return. All fixtures are generated locally; no user PDFs are read. `npm test` additionally renders a real synthetic PDF (including a form value) through both engines, asserts identical page pixels and unchanged source bytes, and verifies the updated engine completes when animation frames throw.

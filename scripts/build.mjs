@@ -1,3 +1,4 @@
+import {backgroundSafePdfJs} from './pdfjs-background.mjs';
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
@@ -5,7 +6,8 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),dist=
 fs.rmSync(dist,{recursive:true,force:true});fs.mkdirSync(path.join(dist,'vendor'),{recursive:true});
 for(const f of ['manifest.json','popup.html','popup.css','popup.js','viewer.html','viewer.css','viewer.js','matcher.js','export.js','scanner.js','startup.js','pdf-source.js'])fs.copyFileSync(path.join(root,f),path.join(dist,f));
 fs.copyFileSync(path.join(root,'node_modules','pdf-lib','dist','pdf-lib.min.js'),path.join(dist,'vendor','pdf-lib.min.js'));
-for(const f of ['pdf.mjs','pdf.worker.mjs'])fs.copyFileSync(path.join(root,'node_modules','pdfjs-dist','build',f),path.join(dist,'vendor',f));
+fs.writeFileSync(path.join(dist,'vendor','pdf.mjs'),backgroundSafePdfJs(fs.readFileSync(path.join(root,'node_modules','pdfjs-dist','build','pdf.mjs'),'utf8')));
+fs.copyFileSync(path.join(root,'node_modules','pdfjs-dist','build','pdf.worker.mjs'),path.join(dist,'vendor','pdf.worker.mjs'));
 
 const ocr=path.join(dist,'vendor','ocr');
 fs.mkdirSync(ocr,{recursive:true});
