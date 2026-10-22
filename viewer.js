@@ -3,6 +3,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc=chrome.runtime.getURL('vendor/pdf.worker.
 const $=id=>document.getElementById(id);
 const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false};
 const cards=new Map();
+let pageObserver=null;
+const sleepFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
 const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
 $('threshold').value='0';
 const mode=()=>MODE[Number($('threshold').value)];
@@ -12,7 +14,7 @@ $('possible').onchange=renderMarks;
 $('file').onchange=async e=>{const f=e.target.files?.[0];if(f)await openPdf(await f.arrayBuffer(),f.name);e.target.value='';};
 $('rescan').onclick=()=>scan();
 $('jumpForm').onsubmit=e=>{e.preventDefault();const n=Number($('jump').value);if(!Number.isInteger(n)||n<1||n>cards.size){$('jumpStatus').textContent='Enter a page from 1 to '+cards.size;return;}cards.get(n).scrollIntoView({behavior:'smooth',block:'start'});$('jumpStatus').textContent='Page '+n+' of '+cards.size;};
-$('export').onclick=downloadAnnotated;
+$('export').onclick=downloadClean;
 
 function status(message){$('progress').textContent=message;}
 const params=new URLSearchParams(location.search);
@@ -22,7 +24,7 @@ if(params.has('source')){
  catch(e){status('Portal import failed: '+e.message+'. Download that PDF from the portal and choose it here.');}
 }
 async function openPdf(data,name){
- ++state.run;state.pdf=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
+ ++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
  $('pages').replaceChildren();$('matches').replaceChildren();$('placeholder').hidden=true;$('export').disabled=true;$('rescan').disabled=true;
  try{state.bytes=new Uint8Array(data);state.pdf=await pdfjsLib.getDocument({data:state.bytes.slice()}).promise;state.name=name;await scan();}
  catch(err){status('Unable to load PDF: '+err.message);$('stats').textContent='Could not read PDF';console.error(err);}
@@ -194,75 +196,123 @@ function renderMarks(){
   cover.append(watermark);card.append(cover);
  }
 }
+async function renderCard(n,run){
+ if(run!==state.run)return;
+ const card=cards.get(n);if(!card||card.dataset.rendered)return;
+ card.dataset.rendered='pending';
+ try{
+  const page=await state.pdf.getPage(n);
+  const v=page.getViewport({scale:1});
+  const canvas=await renderPage(page,Math.min(1.15,850/v.width));
+  if(run!==state.run)return;
+  card.prepend(canvas);
+  card.dataset.rendered='yes';
+  const v2=page.getViewport({scale:1});
+  card.style.minHeight=Math.ceil(Math.min(1.15,850/v2.width)*v2.height)+'px';
+  // Overlay stays above rendered canvas.
+ }catch(err){card.dataset.rendered='';console.error('Page display failed',n,err);}
+}
+function initVirtualPages(run){
+ pageObserver?.disconnect();
+ pageObserver=new IntersectionObserver(entries=>{
+  for(const entry of entries){
+   if(entry.isIntersecting){const n=Number(entry.target.dataset.page);pageObserver.unobserve(entry.target);void renderCard(n,run);}
+  }
+ },{root:$('stage'),rootMargin:'900px 0px'});
+ for(let n=1;n<=state.pdf.numPages;n++){
+  const card=document.createElement('div');card.className='pagecard';card.id='pdf-page-'+n;card.dataset.page=String(n);
+  const label=document.createElement('span');label.className='pagenum';label.textContent='Page '+n;
+  card.append(label);card.style.width='min(850px,100%)';card.style.minHeight='1100px';
+  $('pages').append(card);cards.set(n,card);pageObserver.observe(card);
+ }
+}
 async function scan(){
- if(!state.pdf)return;const run=++state.run;cards.clear();state.signatures=[];state.matches=[];state.possible=[];
- $('pages').replaceChildren();$('rescan').disabled=true;$('export').disabled=true;
+ if(!state.pdf)return;
+ const run=++state.run;pageObserver?.disconnect();cards.clear();
+ state.signatures=[];state.matches=[];state.possible=[];state.ocrReady=false;
+ $('pages').replaceChildren();$('matches').replaceChildren();$('rescan').disabled=true;$('export').disabled=true;
+ initVirtualPages(run);
+ // Lightweight initial pass: no full-size page previews, no OCR yet.
  for(let n=1;n<=state.pdf.numPages;n++){
   if(run!==state.run)return;
   try{
-   status('Scanning '+n+' / '+state.pdf.numPages+' pages');
+   status('Preparing page '+n+' / '+state.pdf.numPages);
    const page=await state.pdf.getPage(n);const v=page.getViewport({scale:1});
-   const mini=await renderPage(page,Math.min(.65,450/v.width));
+   const mini=await renderPage(page,Math.min(.4,290/v.width));
    const text=await page.getTextContent();
-   const sig=signature(mini,textTokens(text));sig.ocr='';state.signatures.push(sig);
+   const sig=signature(mini,textTokens(text));
+   sig.ocr=text.items.map(item=>item.str||'').join(' ');
+   sig.embedded=sig.ocr.trim().length>80;
+   state.signatures.push(sig);
    mini.width=0;mini.height=0;
-   const display=await renderPage(page,Math.min(1.15,850/v.width));
-   const card=document.createElement('div');card.className='pagecard';card.id='pdf-page-'+n;card.append(display);
-   const lbl=document.createElement('span');lbl.className='pagenum';lbl.textContent='Page '+n;card.append(lbl);
-   $('pages').append(card);cards.set(n,card);page.cleanup();
-  }catch(e){status('Error at page '+n+': '+e.message);console.error(e);return;}
+   // Yield for interaction without timer-based pauses.
+   if(n%6===0)await sleepFrame();
+  }catch(err){status('Could not prepare page '+n+': '+err.message);console.error(err);return;}
  }
- if(run!==state.run)return;await recognizeAll(run);if(run!==state.run)return;classify();status(state.ocrReady?'Analysis finished. Only high-confidence duplicates are labeled; unverified pages remain unmarked.':'OCR could not start. No automatic duplicates were confirmed; check the browser console and reload this extension.');
+ if(run!==state.run)return;
+ await recognizeAll(run);
+ if(run!==state.run)return;
+ classify();
+ status('Analysis complete. Review the duplicates list before downloading the cleaned PDF.');
 }
-async function downloadAnnotated(){
+async function downloadClean(){
  if(!state.pdf||!state.bytes)return;
- const btn=$('export');btn.disabled=true;
+ const duplicates=[...new Set(state.matches.map(m=>m.page))].sort((a,b)=>a-b);
+ if(!duplicates.length){status('No confirmed duplicates to remove. Source PDF is already the clean version.');return;}
+ const shown=duplicates.length<=16?duplicates.join(', '):duplicates.slice(0,16).join(', ')+', …';
+ const ok=confirm('Create a NEW PDF without '+duplicates.length+' marked duplicate page(s)?\\nPages to remove: '+shown+'\\n\\nThe original PDF will not be changed. Please verify these matches first.');
+ if(!ok)return;
+ const button=$('export');button.disabled=true;
  try{
-  status('Generating annotated PDF locally… This can take longer for large scanned files.');
-  const {PDFDocument,rgb,degrees,StandardFonts}=globalThis.PDFLib;
-  if(!PDFDocument)throw Error('PDF export engine was not loaded.');
+  status('Saving clean PDF…');
+  const {PDFDocument}=globalThis.PDFLib;
   const pdf=await PDFDocument.load(state.bytes,{ignoreEncryption:false});
-  const font=await pdf.embedFont(StandardFonts.HelveticaBold);
-  for(const m of state.matches){
-   const p=pdf.getPage(m.page-1);
-   const width=p.getWidth(),height=p.getHeight();
-   p.drawRectangle({x:0,y:0,width,height,color:rgb(1,.86,.3),opacity:.17,borderWidth:0});
-   const label='D'+m.original,size=Math.min(width/3,110),textWidth=font.widthOfTextAtSize(label,size);
-   p.drawText(label,{x:Math.max(12,(width-textWidth)/2),y:height/2,size,font,color:rgb(.55,.4,.07),opacity:.36});
-  }
-  const output=await pdf.save({useObjectStreams:true});
-  const blob=new Blob([output],{type:'application/pdf'});const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\.pdf$/i,'')+'-duplicates-marked.pdf';document.body.append(a);a.click();a.remove();
+  // Descending indices ensure that original page numbers are preserved during deletion.
+  for(const n of duplicates.slice().reverse())pdf.removePage(n-1);
+  const data=await pdf.save({useObjectStreams:true});
+  const blob=new Blob([data],{type:'application/pdf'}),url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\\.pdf$/i,'')+'-without-duplicates.pdf';
+  document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),120000);
-  status('Annotated PDF downloaded. Original source file is unchanged. Only confirmed duplicates were marked.');
- }catch(e){status('Could not export PDF: '+e.message);console.error(e);}
- finally{btn.disabled=false;}
+  status('Clean PDF downloaded: '+(state.pdf.numPages-duplicates.length)+' pages retained. Original unchanged.');
+ }catch(err){status('Clean PDF export failed: '+err.message);console.error(err);}
+ finally{button.disabled=false;}
 }
-
 async function recognizeAll(run){
- if(typeof Tesseract==='undefined'){status('OCR engine unavailable; no automatic duplicates will be marked.');return;}
- let worker;
+ if(typeof Tesseract==='undefined'){status('Offline OCR unavailable; using embedded PDF text where available.');return;}
+ // Two workers process separate pages concurrently; tune conservatively to avoid memory spikes.
+ const workerCount=Math.min(2,Math.max(1,navigator.hardwareConcurrency||2));
+ const workers=[];
  try{
- status('Initializing offline OCR engine…');
- worker=await Tesseract.createWorker('eng',1,{
-  workerPath:chrome.runtime.getURL('vendor/ocr/worker.min.js'),
-  corePath:chrome.runtime.getURL('vendor/ocr/'),
-  langPath:chrome.runtime.getURL('vendor/ocr/'),
-  gzip:false,workerBlobURL:false
- });
- state.ocrReady=true;
- for(let i=0;i<state.signatures.length;i++){
-  if(run!==state.run)break;
-  status('Reading document text '+(i+1)+' / '+state.signatures.length+' (higher accuracy mode)…');
-  const page=await state.pdf.getPage(i+1);
-  const vp=page.getViewport({scale:1});
-  const image=await renderPage(page,Math.min(1.8,1450/vp.width));
-  try{
-   const recognition=await worker.recognize(image);
-   state.signatures[i].ocr=recognition?.data?.text||'';
-  }catch(e){console.warn('OCR page '+(i+1)+' unavailable',e);}
-  image.width=0;image.height=0;page.cleanup();
- }
- }catch(e){console.error('Offline OCR could not initialize',e);status('Offline OCR unavailable: '+e.message+'. Unverified pages will stay unmarked.');}
- finally{if(worker)await worker.terminate();}
+  status('Starting offline OCR ('+workerCount+' workers)…');
+  for(let n=0;n<workerCount;n++){
+   workers.push(await Tesseract.createWorker('eng',1,{
+    workerPath:chrome.runtime.getURL('vendor/ocr/worker.min.js'),
+    corePath:chrome.runtime.getURL('vendor/ocr/'),
+    langPath:chrome.runtime.getURL('vendor/ocr/'),
+    gzip:false,workerBlobURL:false
+   }));
+  }
+  state.ocrReady=true;
+  let cursor=0,done=0;
+  async function consume(worker){
+   for(;;){
+    const i=cursor++;if(i>=state.signatures.length||run!==state.run)return;
+    const sig=state.signatures[i];
+    if(sig.embedded){done++;continue;} // embedded selectable text is already available
+    let image;
+    try{
+     const page=await state.pdf.getPage(i+1),viewport=page.getViewport({scale:1});
+     image=await renderPage(page,Math.min(1.5,1100/viewport.width));
+     const result=await worker.recognize(image);
+     sig.ocr=result?.data?.text||sig.ocr;
+    }catch(err){console.warn('OCR failed for page '+(i+1),err);}
+    finally{if(image){image.width=0;image.height=0;}}
+    done++;
+    status('Reading document '+done+' / '+state.signatures.length+' pages (fast parallel OCR)');
+   }
+  }
+  await Promise.all(workers.map(consume));
+ }catch(err){console.error('OCR startup failed',err);status('OCR unavailable: '+err.message);}
+ finally{await Promise.allSettled(workers.map(w=>w.terminate()));}
 }
