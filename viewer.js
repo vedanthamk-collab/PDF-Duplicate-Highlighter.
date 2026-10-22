@@ -103,21 +103,27 @@ function overlap(a,b){
  return na+nb?2*common/(na+nb):0;
 }
 function extractedIds(raw){
- // Invoice IDs and amounts must not conflict when recognizable.
  const cleaned=(raw||'').toLowerCase().replace(/\s+/g,' ');
  const out={};
  for(const [kind,re] of [
-  ['invoice',/(?:invoice|bill)\s*(?:no|number|#|:|\.){0,8}\s*[:.#-]?\s*([a-z0-9-]{5,})/],
-  ['patient',/(?:patient\s*id|lab\s*no)\s*[:.#-]?\s*([a-z0-9-]{6,})/]
- ]){const match=cleaned.match(re);if(match)out[kind]=match[1];}
+  ['invoice',/(?:invoice|bill)\s*(?:no|number|#|:|\.){0,8}\s*[:.#-]?\s*([0-9-]{8,})/],
+  ['patient',/(?:patient\s*id|lab\s*no)\s*[:.#-]?\s*([0-9-]{8,})/]
+ ]){const match=cleaned.match(re);if(match)out[kind]=match[1].replace(/-/g,'');}
  return out;
 }
 function identityConflict(a,b){
  const x=extractedIds(a.ocr),y=extractedIds(b.ocr);
  for(const key of ['invoice','patient']){
-  if(x[key]&&y[key]&&x[key]!==y[key]&&x[key].length>=6&&y[key].length>=6)return true;
+  if(x[key]&&y[key]&&x[key]!==y[key])return true;
  }
  return false;
+}
+function clinicalValue(text){
+ const raw=(text||'').toLowerCase().replace(/\s+/g,' ');
+ // Explicit value attached to named investigation. Shared lab form headings aren't enough.
+ const match=raw.match(/\bcrp\b\s*[:=-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:mg|\/|mgl|$)/)
+  ||raw.match(/\bcrp\b\s*[:=-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)(?=\s)/);
+ return match?['crp',match[1].replace(',','.')]:null;
 }
 function classify(){
  state.matches=[];state.possible=[];const originals=[];
@@ -135,13 +141,16 @@ function classify(){
    const samePatient=!!(currentIds.patient&&ids.patient&&currentIds.patient===ids.patient);
    const sameType=/(ha?ematology|biochemistry|serology|crp|cbc)/i.test(current.ocr)&&
        /(ha?ematology|biochemistry|serology|crp|cbc)/i.test(ref.ocr);
-   // A recurring header or visual template is never sufficient proof.
-   // Invoice number + substantial OCR overlap can tolerate different camera photographs.
+   const valueA=clinicalValue(current.ocr),valueB=clinicalValue(ref.ocr);
+   const clinicalEqual=!!(valueA&&valueB&&valueA[0]===valueB[0]&&valueA[1]===valueB[1]);
+   const clinicalConflict=!!(valueA&&valueB&&valueA[0]===valueB[0]&&valueA[1]!==valueB[1]);
+   if(clinicalConflict)continue;
+   // Matching invoice numbers have more evidentiary weight than shared layouts.
    const invoiceMatch=sameInvoice&&word>=.63&&nums>=.63;
    const medicalMatch=samePatient&&sameType&&word>=.65&&nums>=.80;
-   // If no identifier is readable, require almost identical OCR content and a strong image match.
-   const genericMatch=!sameInvoice&&!samePatient&&word>=.965&&nums>=.965&&similarity(current,ref).visual>=.90;
-   if(!(invoiceMatch||medicalMatch||genericMatch))continue;
+   const clinicalMatch=clinicalEqual&&word>=.72&&nums>=.69;
+   const genericMatch=!sameInvoice&&!samePatient&&!clinicalEqual&&word>=.965&&nums>=.965&&similarity(current,ref).visual>=.90;
+   if(!(invoiceMatch||medicalMatch||clinicalMatch||genericMatch))continue;
    const score=word*.5+nums*.5;
    if(!best||score>best.score)best={original:j+1,score};
   }
