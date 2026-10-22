@@ -14,6 +14,11 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: node --check viewer.js
       - run: node --check popup.js
+      - name: Download offline English OCR model
+        run: |
+          mkdir -p assets
+          curl --fail --location --silent --show-error --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata -o assets/eng.traineddata
+          test $(stat -c%s assets/eng.traineddata) -gt 2000000
       - run: npm run build
       - uses: actions/upload-artifact@v4
         with:
