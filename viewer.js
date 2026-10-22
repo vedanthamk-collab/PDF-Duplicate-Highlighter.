@@ -1,9 +1,9 @@
 import * as pdfjsLib from './vendor/pdf.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc=chrome.runtime.getURL('vendor/pdf.worker.mjs');
 const $=id=>document.getElementById(id);
-const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0};
+const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false};
 const cards=new Map();
-const MODE=[{name:'Very strict',confirmed:.995,review:.91},{name:'Strict',confirmed:.99,review:.87},{name:'Review more',confirmed:.985,review:.82}];
+const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
 $('threshold').value='0';
 const mode=()=>MODE[Number($('threshold').value)];
 $('threshold').oninput=()=>{$('thresholdLabel').textContent=mode().name;};
@@ -89,29 +89,61 @@ function similarity(a,b){
  for(const r of b.rotations){const value=compareImages(a.rotations[0],r);if(value>visual)visual=value;}
  return {visual,semantic:ta};
 }
+function fingerprint(text){
+ const raw=(text||'').toLowerCase().replace(/[^a-z0-9./\\s-]/g,' ');
+ const words=(raw.match(/[a-z]{2,}|\\d+(?:[./-]\\d+)*/g)||[]);
+ const counts=new Map(),numbers=new Map();
+ for(const word of words){counts.set(word,(counts.get(word)||0)+1);if(/\\d/.test(word)&&word.length>=2)numbers.set(word,(numbers.get(word)||0)+1);}
+ return {words,counts,numbers};
+}
+function overlap(a,b){
+ let common=0,na=0,nb=0;
+ for(const v of a.values())na+=v;for(const v of b.values())nb+=v;
+ for(const [k,v] of a)common+=Math.min(v,b.get(k)||0);
+ return na+nb?2*common/(na+nb):0;
+}
+function extractedIds(raw){
+ // Invoice IDs and amounts must not conflict when recognizable.
+ const cleaned=(raw||'').toLowerCase().replace(/\\s+/g,' ');
+ const out={};
+ for(const [kind,re] of [
+  ['invoice',/(?:invoice|bill)\\s*(?:no|number|#|:|\\.){0,8}\\s*[:.#-]?\\s*([a-z0-9-]{5,})/],
+  ['patient',/(?:patient\\s*id|lab\\s*no)\\s*[:.#-]?\\s*([a-z0-9-]{6,})/]
+ ]){const match=cleaned.match(re);if(match)out[kind]=match[1];}
+ return out;
+}
+function identityConflict(a,b){
+ const x=extractedIds(a.ocr),y=extractedIds(b.ocr);
+ for(const key of ['invoice','patient']){
+  if(x[key]&&y[key]&&x[key]!==y[key]&&x[key].length>=6&&y[key].length>=6)return true;
+ }
+ return false;
+}
 function classify(){
- state.matches=[];state.possible=[];const settings=mode(),keepers=[];
+ state.matches=[];state.possible=[];
+ // Important: no weak suggestions. Only confirmed matches appear.
+ const originals=[];
  for(let i=0;i<state.signatures.length;i++){
-  const sig=state.signatures[i];let best=null;
-  for(const j of keepers){
-   const candidate=state.signatures[j];const s=similarity(sig,candidate);
-   // When text exists, conflicting words/numbers must prevent automatic duplicate marking.
-   const textConflict=s.semantic!==null&&s.semantic<.985;
-   if(textConflict&&s.visual<.985)continue;
-   const combined=s.visual;
-   if(!best||combined>best.visual)best={page:i+1,original:j+1,...s,textConflict};
+  const current=state.signatures[i],currentText=fingerprint(current.ocr||'');
+  let best=null;
+  for(const j of originals){
+   const ref=state.signatures[j];
+   if(identityConflict(current,ref))continue;
+   const source=fingerprint(ref.ocr||'');
+   // OCR must contain enough actual document content; header alone is not sufficient.
+   if(currentText.words.length<24||source.words.length<24)continue;
+   const word=overlap(currentText.counts,source.counts);
+   const nums=overlap(currentText.numbers,source.numbers);
+   // Cross-check image similarity, but never use page layout alone as proof.
+   const img=similarity(current,ref).visual;
+   const yes=word>=.82&&nums>=.88&&img>=.72;
+   if(yes){const score=word*.45+nums*.45+img*.1;if(!best||score>best.score)best={original:j+1,score};}
   }
   const override=state.overrides.get(i+1);
   if(override?.type==='confirm'){state.matches.push({page:i+1,original:override.original,manual:true});continue;}
-  if(override?.type==='reject'){keepers.push(i);continue;}
-  // Auto-confirm only essentially identical printed foreground AND nonconflicting text.
-  if(best&&!best.textConflict&&best.visual>=settings.confirmed){
-   state.matches.push({page:i+1,original:best.original,score:best.visual});continue;
-  }
-  if(best&&best.visual>=settings.review){
-   state.possible.push({page:i+1,original:best.original,score:best.visual});
-  }
-  keepers.push(i);
+  if(override?.type==='reject'){originals.push(i);continue;}
+  if(best){state.matches.push({page:i+1,original:best.original,score:best.score});continue;}
+  originals.push(i);
  }
  showResults();
 }
@@ -155,9 +187,9 @@ async function scan(){
   try{
    status('Scanning '+n+' / '+state.pdf.numPages+' pages');
    const page=await state.pdf.getPage(n);const v=page.getViewport({scale:1});
-   const mini=await renderPage(page,Math.min(.55,380/v.width)); // more detail than old 180 px pass
+   const mini=await renderPage(page,Math.min(.65,450/v.width));
    const text=await page.getTextContent();
-   state.signatures.push(signature(mini,textTokens(text)));
+   const sig=signature(mini,textTokens(text));sig.ocr='';state.signatures.push(sig);
    mini.width=0;mini.height=0;
    const display=await renderPage(page,Math.min(1.15,850/v.width));
    const card=document.createElement('div');card.className='pagecard';card.id='pdf-page-'+n;card.append(display);
@@ -165,7 +197,7 @@ async function scan(){
    $('pages').append(card);cards.set(n,card);page.cleanup();
   }catch(e){status('Error at page '+n+': '+e.message);console.error(e);return;}
  }
- if(run!==state.run)return;classify();status('Finished. Review all proposed matches before skipping pages.');
+ if(run!==state.run)return;await recognizeAll(run);if(run!==state.run)return;classify();status('Analysis finished. Only high-confidence duplicates are labeled; unverified pages remain unmarked.');
 }
 async function downloadAnnotated(){
  if(!state.pdf||!state.bytes)return;
@@ -190,4 +222,32 @@ async function downloadAnnotated(){
   status('Annotated PDF downloaded. Original source file is unchanged. Only confirmed duplicates were marked.');
  }catch(e){status('Could not export PDF: '+e.message);console.error(e);}
  finally{btn.disabled=false;}
+}
+
+async function recognizeAll(run){
+ if(typeof Tesseract==='undefined'){status('OCR engine unavailable; no automatic duplicates will be marked.');return;}
+ let worker;
+ try{
+ status('Initializing offline OCR engine…');
+ worker=await Tesseract.createWorker('eng',1,{
+  workerPath:chrome.runtime.getURL('vendor/ocr/worker.min.js'),
+  corePath:chrome.runtime.getURL('vendor/ocr/'),
+  langPath:chrome.runtime.getURL('vendor/ocr/'),
+  gzip:false,workerBlobURL:false
+ });
+ state.ocrReady=true;
+ for(let i=0;i<state.signatures.length;i++){
+  if(run!==state.run)break;
+  status('Reading document text '+(i+1)+' / '+state.signatures.length+' (higher accuracy mode)…');
+  const page=await state.pdf.getPage(i+1);
+  const vp=page.getViewport({scale:1});
+  const image=await renderPage(page,Math.min(1.8,1450/vp.width));
+  try{
+   const recognition=await worker.recognize(image);
+   state.signatures[i].ocr=recognition?.data?.text||'';
+  }catch(e){console.warn('OCR page '+(i+1)+' unavailable',e);}
+  image.width=0;image.height=0;page.cleanup();
+ }
+ }catch(e){console.error('Offline OCR could not initialize',e);status('Offline OCR unavailable: '+e.message+'. Unverified pages will stay unmarked.');}
+ finally{if(worker)await worker.terminate();}
 }
