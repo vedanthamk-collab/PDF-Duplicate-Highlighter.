@@ -33,3 +33,17 @@ Load the generated `dist/` folder in Chrome. The build bundles local `pdfjs-dist
 Pages are rendered at reduced scale for comparison. Each page's normalized grayscale thumbnail and difference hash are compared against earlier pages. Strict thresholds avoid blindly marking similar blank forms. The first occurrence owns the group; all later matches receive its page number.
 
 **Limitations:** This is a prototype and visually similar forms can be mistaken for duplicates, particularly when only dates, numbers, or names differ. Review flagged matches before skipping them. Rotated, heavily cropped, or significantly altered scans can be missed. Browser-origin limitations mean some claim-portal PDF URLs cannot be fetched; download those PDFs first. Confirm company policies before processing sensitive patient documents.
+
+## Version 0.2 — Safer matching and navigation
+
+- **Jump to page:** enter the PDF page number in the top toolbar and press Enter (or Go).
+- **Download marked PDF:** top-right button saves a new PDF containing yellow overlays and D-number watermarks on **confirmed** duplicate pages; original PDF remains unmodified. Unconfirmed candidates are not embedded.
+- **Conservative duplicate matching:** compare foreground text/line pixels, including page rotations, and check PDF text when available. Unlike the older version, large matching white areas do not count as proof of identical content.
+- **Manual confirmation:** potential matches appear in the sidebar; select **Confirm D#** or **Not duplicate**. The annotation export includes manual confirmations.
+- **Privacy:** all processing stays in the browser. Note that portal-import permissions still depend on the portal and Chrome access controls.
+
+### Trade-offs and known limitations
+
+This version prioritizes avoiding false positives, so scanned copies with changed lighting or perspective may only appear as review candidates or may be missed altogether. OCR is **not** included: scanned text may not be available for content-level comparison, and visually similar forms with different small numbers must always be checked manually. If identical forms vary significantly in capture angle, add geometric alignment/OCR in a later version.
+
+Creating a downloadable annotated PDF from a large scan (e.g. 100+ MB) requires substantial browser memory. Export annotates pages using source page coordinates and is not a substitute for checking each match. The original document is never overwritten.
