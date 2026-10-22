@@ -90,10 +90,10 @@ function similarity(a,b){
  return {visual,semantic:ta};
 }
 function fingerprint(text){
- const raw=(text||'').toLowerCase().replace(/[^a-z0-9./\\s-]/g,' ');
- const words=(raw.match(/[a-z]{2,}|\\d+(?:[./-]\\d+)*/g)||[]);
+ const raw=(text||'').toLowerCase().replace(/[^a-z0-9./\s-]/g,' ');
+ const words=(raw.match(/[a-z]{2,}|\d+(?:[./-]\d+)*/g)||[]);
  const counts=new Map(),numbers=new Map();
- for(const word of words){counts.set(word,(counts.get(word)||0)+1);if(/\\d/.test(word)&&word.length>=2)numbers.set(word,(numbers.get(word)||0)+1);}
+ for(const word of words){counts.set(word,(counts.get(word)||0)+1);if(/\d/.test(word)&&word.length>=2)numbers.set(word,(numbers.get(word)||0)+1);}
  return {words,counts,numbers};
 }
 function overlap(a,b){
@@ -104,11 +104,11 @@ function overlap(a,b){
 }
 function extractedIds(raw){
  // Invoice IDs and amounts must not conflict when recognizable.
- const cleaned=(raw||'').toLowerCase().replace(/\\s+/g,' ');
+ const cleaned=(raw||'').toLowerCase().replace(/\s+/g,' ');
  const out={};
  for(const [kind,re] of [
-  ['invoice',/(?:invoice|bill)\\s*(?:no|number|#|:|\\.){0,8}\\s*[:.#-]?\\s*([a-z0-9-]{5,})/],
-  ['patient',/(?:patient\\s*id|lab\\s*no)\\s*[:.#-]?\\s*([a-z0-9-]{6,})/]
+  ['invoice',/(?:invoice|bill)\s*(?:no|number|#|:|\.){0,8}\s*[:.#-]?\s*([a-z0-9-]{5,})/],
+  ['patient',/(?:patient\s*id|lab\s*no)\s*[:.#-]?\s*([a-z0-9-]{6,})/]
  ]){const match=cleaned.match(re);if(match)out[kind]=match[1];}
  return out;
 }
@@ -120,24 +120,30 @@ function identityConflict(a,b){
  return false;
 }
 function classify(){
- state.matches=[];state.possible=[];
- // Important: no weak suggestions. Only confirmed matches appear.
- const originals=[];
+ state.matches=[];state.possible=[];const originals=[];
  for(let i=0;i<state.signatures.length;i++){
   const current=state.signatures[i],currentText=fingerprint(current.ocr||'');
-  let best=null;
+  const currentIds=extractedIds(current.ocr||'');let best=null;
   for(const j of originals){
-   const ref=state.signatures[j];
+   const ref=state.signatures[j],ids=extractedIds(ref.ocr||'');
    if(identityConflict(current,ref))continue;
    const source=fingerprint(ref.ocr||'');
-   // OCR must contain enough actual document content; header alone is not sufficient.
    if(currentText.words.length<24||source.words.length<24)continue;
    const word=overlap(currentText.counts,source.counts);
    const nums=overlap(currentText.numbers,source.numbers);
-   // Cross-check image similarity, but never use page layout alone as proof.
-   const img=similarity(current,ref).visual;
-   const yes=word>=.82&&nums>=.88&&img>=.72;
-   if(yes){const score=word*.45+nums*.45+img*.1;if(!best||score>best.score)best={original:j+1,score};}
+   const sameInvoice=!!(currentIds.invoice&&ids.invoice&&currentIds.invoice===ids.invoice);
+   const samePatient=!!(currentIds.patient&&ids.patient&&currentIds.patient===ids.patient);
+   const sameType=/(ha?ematology|biochemistry|serology|crp|cbc)/i.test(current.ocr)&&
+       /(ha?ematology|biochemistry|serology|crp|cbc)/i.test(ref.ocr);
+   // A recurring header or visual template is never sufficient proof.
+   // Invoice number + substantial OCR overlap can tolerate different camera photographs.
+   const invoiceMatch=sameInvoice&&word>=.63&&nums>=.63;
+   const medicalMatch=samePatient&&sameType&&word>=.65&&nums>=.80;
+   // If no identifier is readable, require almost identical OCR content and a strong image match.
+   const genericMatch=!sameInvoice&&!samePatient&&word>=.965&&nums>=.965&&similarity(current,ref).visual>=.90;
+   if(!(invoiceMatch||medicalMatch||genericMatch))continue;
+   const score=word*.5+nums*.5;
+   if(!best||score>best.score)best={original:j+1,score};
   }
   const override=state.overrides.get(i+1);
   if(override?.type==='confirm'){state.matches.push({page:i+1,original:override.original,manual:true});continue;}
