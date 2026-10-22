@@ -55,3 +55,14 @@ This revision replaces the high-volume review queue with **one automatic high-co
 The matcher requires both document identity (when readable, such as invoice or patient/report number) and significant OCR word/number overlap. Pages with insufficient evidence are **not marked**. Report forms containing common headers alone are not enough to confirm a duplicate. The system is deliberately conservative and can miss fuzzy or very faint duplicate scans. Manually inspect any unmarked pages you still suspect are repeated.
 
 The extension does **not** guarantee perfect accuracy. In particular: faint carbon-copy pharmacy pages, rotated scans, heavy camera shadows, and images of near-identical forms can require more advanced alignment and document field extraction. The page-jump and annotated PDF export remain available.
+
+## v0.4 — Faster processing and clean PDF export
+
+- Uses **two offline OCR workers** to process different pages concurrently, rather than one worker for every page.
+- Skips OCR on pages with sufficiently rich, embedded selectable PDF text.
+- Displays pages lazily when you scroll to them; it no longer renders all page previews before analysis.
+- The former annotated export is replaced with **Download PDF without duplicates**. It removes only pages currently classified as confirmed duplicates; the earliest original is retained. Pages are removed from end to beginning to preserve numbering. A confirmation shows the pages to be removed; the original PDF is never overwritten.
+- **Browser background-tab note:** Dedicated OCR workers are used, but Chrome can still throttle/discard hidden tabs, depending on system memory and Energy Saver. The extension does not guarantee uninterrupted processing when a viewer tab is minimized or discarded. Keep the browser window open until analysis completes; Chrome Settings → Performance → Always keep these sites active may help for some sites, but extensions aren't necessarily eligible.
+- Speed varies by machine, PDF dimensions, number of OCR-heavy pages and Chrome resource limits; **2× is a target, not a guaranteed benchmark**.
+- Before removing pages, verify each confirmed match. False-positive matches can cause a necessary document to be excluded from the *new* copy. Use the Not duplicate action to undo an incorrect match.
+
