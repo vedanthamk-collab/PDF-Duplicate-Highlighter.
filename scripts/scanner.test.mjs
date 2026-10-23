@@ -38,3 +38,10 @@ test('partially initialized workers are terminated if startup fails',async()=>{
  assert.equal(ctx.calls.terminated,1);
  assert.equal(ctx.state.ocrReady,undefined);
 });
+test('billing retries preserve primary matcher text and pass rotation to the renderer',async()=>{
+ const ctx=context([{embedded:false}]),rotations=[];
+ ctx.renderPage=async(_page,_scale,rotation=0)=>{rotations.push(rotation);return {width:600,height:800};};
+ let read=0;ctx.worker.recognize=async()=>({data:++read===1?{text:'primary matching text',confidence:25}:read===2?{text:'weak retry',confidence:40}:{text:'upright bill text',confidence:92}});
+ await recognizeAll(1,ctx);
+ assert.deepEqual(rotations,[0,0,90]);assert.equal(ctx.state.signatures[0].ocr,'primary matching text');assert.equal(ctx.state.signatures[0].billingOcr,'upright bill text');assert.equal(ctx.state.signatures[0].billingNeedsReview,false);assert.equal(ctx.calls.terminated,2);
+});

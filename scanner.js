@@ -1,5 +1,7 @@
+import {recoverBillText} from './bill-ocr.js';
 export async function recognizeAll(run, {state, status, Tesseract, chrome, navigator, renderPage}){
  if(state.signatures.every(sig=>sig.embedded))return;
+ for(const sig of state.signatures)if(!sig.embedded)sig.billingNeedsReview=true;
  if(typeof Tesseract==='undefined'){status('Offline OCR unavailable; using embedded PDF text where available.');return;}
  // Two workers process separate pages concurrently; tune conservatively to avoid memory spikes.
  const workerCount=Math.min(2,Math.max(1,navigator.hardwareConcurrency||2));
@@ -30,10 +32,17 @@ export async function recognizeAll(run, {state, status, Tesseract, chrome, navig
      const result=await worker.recognize(image);
      if(run!==state.run)return;
      sig.ocr=result?.data?.text||sig.ocr;
+     const recovered=await recoverBillText(worker,result,angle=>{
+      if(run===state.run)status('Checking unclear page '+(i+1)+' / '+state.signatures.length+' at higher resolution');
+      return renderPage(page,Math.min(3,2200/viewport.width),angle*180/Math.PI);
+     },()=>run===state.run);
+     if(run!==state.run)return;
+     sig.billingOcr=recovered?.data?.text||sig.ocr;
+     sig.billingNeedsReview=Number.isFinite(recovered?.data?.confidence)&&recovered.data.confidence<75;
     }catch(err){console.warn('OCR failed for page '+(i+1),err);}
     finally{if(image){image.width=0;image.height=0;}}
     done++;
-    if(run===state.run)status('Reading document '+done+' / '+state.signatures.length+' pages (fast parallel OCR)');
+    if(run===state.run)status('Reading document '+done+' / '+state.signatures.length+' pages');
    }
   }
   await Promise.all(workers.map(consume));

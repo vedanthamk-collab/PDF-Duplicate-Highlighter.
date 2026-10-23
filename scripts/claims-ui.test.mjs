@@ -41,6 +41,7 @@ test('claims UI queues/reorders files, edits totals, restores exclusions, copies
   state.scanComplete=true;workspace.syncLedger();assert.equal(elements.billRows.children.length,2,'billing runs automatically once duplicate scan completes');
   state.matches=[{page:1,original:2}];workspace.syncLedger();assert.equal(elements.billRows.children.length,1,'billing follows confirmed duplicate exclusions');
   state.bytes=bytes;workspace.setBusy(false);assert.equal(elements.clearQueue.disabled,false,'clear remains available for a loaded document with an empty queue');
+  state.matches=[];state.signatures[0].billingNeedsReview=true;workspace.syncLedger();assert.match(elements.billTotal.textContent,/Calculation incomplete/);assert.match(elements.billSummary.textContent,/uncertain OCR/);
   elements.clearQueue.onclick();assert.equal(cleared,2);assert.equal(elements.billRows.children.length,0);assert.equal(elements.stage.hidden,false);
  }finally{
   if(previousDocument===undefined)delete globalThis.document;else globalThis.document=previousDocument;

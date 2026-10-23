@@ -44,7 +44,13 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload,onCle
  function summary(){
   const sum=summarizeBills(rows);
   $('billTotal').textContent='Draft bill total: INR '+formatMoney(sum.totalCents);
-  $('billSummary').textContent=sum.included+' bills included · '+sum.needsReview+' need review'+(sum.invalid.length?' · '+sum.invalid.length+' invalid amounts excluded':'')+' · '+rows.filter(r=>r.documentType==='Other').length+' documents excluded. Receipts are not added.';
+  $('billSummary').textContent=sum.included+' expenses included · '+sum.needsReview+' need review'+(sum.invalid.length?' · '+sum.invalid.length+' invalid amounts excluded':'')+' · '+rows.filter(r=>r.documentType==='Other').length+' documents excluded. Receipts require review and explicit inclusion; linked payments are excluded.';
+  const weakPages=(getState().signatures||[]).filter(s=>s.billingNeedsReview).length;
+  const missingTotals=rows.some(r=>r.documentType!=='Other'&&r.amountCents===null);
+  if(weakPages||missingTotals||sum.needsReview){
+   $('billSummary').textContent+=' Calculation incomplete: '+(weakPages?weakPages+' pages have uncertain OCR.':'verify missing totals.');
+   if(!sum.included)$('billTotal').textContent='Calculation incomplete — review required';
+  }
   $('copyBills').disabled=busy||!rows.some(r=>r.documentType!=='Other');$('exportBills').disabled=busy||!rows.some(r=>r.documentType!=='Other'&&r.pages.length);
   // A copied table must never be described as current after edits.
   $('copyStatus').textContent='';$('copyFallback').hidden=true;
@@ -61,7 +67,7 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload,onCle
     const restore=document.createElement('button');restore.textContent='Review as bill';restore.onclick=()=>{save(row,'documentType','Bill');save(row,'included',false);render();};item.append(link,restore);$('excludedRows').append(item);continue;
    }
    const tr=document.createElement('tr');
-   const include=document.createElement('input');include.type='checkbox';include.checked=row.included&&row.documentType==='Bill';include.disabled=row.documentType!=='Bill';include.setAttribute('aria-label','Include '+row.id+' in bill total');include.onchange=()=>save(row,'included',include.checked);cell(tr).append(include);
+   const include=document.createElement('input');include.type='checkbox';include.checked=row.included;include.disabled=row.documentType==='Receipt'&&!!row.linkedBillId;include.title=row.documentType==='Receipt'?'Standalone receipt: review first, then include only if no separate bill covers this expense.':'';include.setAttribute('aria-label','Include '+row.id+' in bill total');include.onchange=()=>save(row,'included',include.checked);cell(tr).append(include);
    const source=document.createElement('button');source.className='source-link';source.textContent=row.pages.length?'p. '+row.pages.join(', '):'Manual';source.title=row.fileName;source.onclick=()=>jump(row);cell(tr).append(source);
    input(tr,row,'billNo','Bill number',row.billNo);input(tr,row,'billDate','Bill date',row.billDate);
    input(tr,row,'billType','Bill type',row.billType).setAttribute('list','billCategories');
