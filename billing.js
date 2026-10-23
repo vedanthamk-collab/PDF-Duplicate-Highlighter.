@@ -66,8 +66,8 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
  for(const group of keys.values())if(group.length>1)for(const row of group){row.issues.push('Repeated bill number: check for overlap');row.included=false;}
  for(const receipt of rows.filter(r=>r.documentType==='Receipt')){
   const bills=rows.filter(b=>b.documentType==='Bill'&&receipt.referenceNo&&b.billNo.toLowerCase()===receipt.referenceNo.toLowerCase()&&b.currency===receipt.currency);
-  if(bills.length===1){receipt.linkedBillId=bills[0].id;receipt.remarks='Payment against '+bills[0].billNo+' (not added again)';}
-  else receipt.remarks='Unmatched receipt: not added to bill total';
+  if(bills.length===1){receipt.linkedBillId=bills[0].id;receipt.remarks='Paid against '+bills[0].billNo;}
+  else receipt.remarks='Unmatched receipt';
   receipt.included=false;
  }
  return rows;
@@ -83,9 +83,9 @@ export function summarizeBills(rows){
  return {totalCents,included,invalid,needsReview:rows.filter(r=>r.documentType!=='Other'&&!r.reviewed&&r.issues.length).length};
 }
 export function billTableData(rows){
- const data=[['Bill no.','Bill date','Bill type','Bill amount','Type','Remarks','Included in bill total','Source pages']];
- for(const r of rows.filter(r=>r.documentType!=='Other'))data.push([r.billNo,r.billDate,r.billType,r.amountCents===null?'':r.currency+' '+formatMoney(r.amountCents),r.documentType,[r.remarks,...(r.reviewed?[]:r.issues)].filter(Boolean).join('; '),r.included&&r.documentType==='Bill'&&r.currency==='INR'&&Number.isSafeInteger(r.amountCents)?'Yes':'No',r.pages.join(', ')]);
- const sum=summarizeBills(rows);data.push(['','','Draft bill total','INR '+formatMoney(sum.totalCents),'','Bill expenses only; receipts excluded','','']);return data;
+ const data=[['Bill no.','Bill date','Bill type','Bill amount','Type','Remarks','Included in bill total','Source pages','Review issues']];
+ for(const r of rows.filter(r=>r.documentType!=='Other'))data.push([r.billNo,r.billDate,r.billType,r.amountCents===null?'':r.currency+' '+formatMoney(r.amountCents),r.documentType,r.remarks,r.included&&r.documentType==='Bill'&&r.currency==='INR'&&Number.isSafeInteger(r.amountCents)?'Yes':'No',r.pages.join(', '),r.reviewed?'':r.issues.join('; ')]);
+ const sum=summarizeBills(rows);data.push(['','','Draft bill total','INR '+formatMoney(sum.totalCents),'','Bills only','','','']);return data;
 }
 export function spreadsheetText(value){const text=String(value??'').replace(/[\t\r\n]+/g,' ');return /^[\s]*[=+@-]/.test(text)?"'"+text:text;}
 export function tableToTsv(data){return data.map(row=>row.map(spreadsheetText).join('\t')).join('\n');}
