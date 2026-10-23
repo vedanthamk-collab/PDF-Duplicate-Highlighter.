@@ -13,7 +13,7 @@
 <main id="workspaceMain">
  <aside aria-label="Scan results">
   <h2>Documents</h2>
-  <details id="uploadQueue"><summary id="queueCount">0 files</summary><p class="hint">PDF, JPG, PNG. Reorder before merging.</p><ol id="fileQueue"></ol><div class="queue-buttons"><button id="mergeScan" disabled>Merge &amp; scan</button><button id="clearQueue" class="secondary" disabled>Clear</button></div></details>
+  <details id="uploadQueue"><summary id="queueCount">0 files</summary><p class="hint">PDF, JPG, PNG. Reorder before merging.</p><ol id="fileQueue"></ol><div class="queue-buttons"><button id="mergeScan" disabled>Merge &amp; scan</button><button id="clearQueue" class="secondary" disabled title="Clear files, preview, scan results and bill table">Clear all</button></div></details>
   <div id="stats" role="status">Add documents to begin.</div>
   <div class="hint">Uncertain pages are kept.</div>
   <input id="threshold" type="hidden" value="0"><input id="possible" type="checkbox" hidden checked><b id="thresholdLabel" hidden></b>
@@ -27,7 +27,7 @@
  <section id="stage" aria-label="PDF preview"><div id="placeholder"><div class="paper-art" aria-hidden="true"><span>01</span><i></i><i></i><i></i></div><div class="eyebrow">LESS REPETITION. MORE CLARITY.</div><h1>Make room for<br>the pages that matter.</h1><p>Add PDFs, JPGs and PNGs together.<br>Merge, find duplicates and calculate bill expenses.</p><span class="empty-note">Local processing · Offline English OCR · Original untouched</span></div><div id="pages"></div></section>
  <section id="billView" role="tabpanel" aria-labelledby="billsTab" hidden>
   <div class="bill-heading"><div><h2>Bill calculation</h2><p class="hint">Draft extraction. Verify against source pages. Total = bill expenses in INR; receipts are excluded.</p></div><button id="addBill" class="secondary">Add bill row</button></div>
-  <p id="billEmpty">Scan documents to extract bills and receipts. Excluded pages can be restored below.</p>
+  <p id="billEmpty">Add documents and complete a duplicate scan first. Bill extraction runs only when you open this tab. Excluded pages can be restored below.</p>
   <datalist id="billCategories"><option value="Pharmacy"><option value="Diagnostics"><option value="Hospital"><option value="Consultation"><option value="Other"></datalist><div class="bill-table-wrap"><table class="bill-table"><thead><tr><th>Include</th><th>Pages</th><th>Bill no.</th><th>Bill date</th><th>Bill type</th><th>Bill amount</th><th>Currency</th><th>Type</th><th>Remarks</th><th>Reviewed / issues</th></tr></thead><tbody id="billRows"></tbody></table></div>
   <details class="excluded-documents"><summary id="excludedCount">Excluded documents (0)</summary><div id="excludedRows"></div></details>
   <div class="bill-total-panel"><strong id="billTotal">Draft bill total: INR 0.00</strong><p id="billSummary"></p><button id="exportBills" class="secondary" disabled title="Includes listed bill and receipt pages, even those excluded from the total">Bills &amp; receipts PDF</button> <button id="copyBills" disabled>Copy table</button><span id="copyStatus" role="status" aria-live="polite"></span><textarea id="copyFallback" aria-label="Copy bill table manually" hidden readonly></textarea></div>

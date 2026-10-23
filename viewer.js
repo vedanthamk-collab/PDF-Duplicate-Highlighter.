@@ -9,7 +9,7 @@ const $=id=>document.getElementById(id);
 const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false,scanComplete:false,provenance:[]};
 const cards=new Map();
 let pageObserver=null;
-const workspace=initClaims({getState:()=>state,onMerged:openPdf,onBillsDownload:downloadBills,showDocument:n=>cards.get(n)?.scrollIntoView({behavior:'smooth',block:'start'})});
+const workspace=initClaims({getState:()=>state,onMerged:openPdf,onBillsDownload:downloadBills,onClear:()=>location.replace(chrome.runtime.getURL('viewer.html')),showDocument:n=>cards.get(n)?.scrollIntoView({behavior:'smooth',block:'start'})});
 // Scanner does not await requestAnimationFrame: browsers suspend it in hidden tabs.
 const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
 $('threshold').value='0';
