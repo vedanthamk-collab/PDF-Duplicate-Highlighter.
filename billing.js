@@ -37,7 +37,7 @@ function extract(text){
   if(values.length)break;
  }
  const amountCents=values.length===1?values[0]:null;
- const billType=/\b(pharmacy|pharma|medicines|medical store)\b/i.test(text)?'Pharmacy':/\b(laboratory|diagnostic|pathology|lab)\b/i.test(text)?'Diagnostics':/\b(hospital|inpatient|discharge)\b/i.test(text)?'Hospital':/\b(consultation|clinic)\b/i.test(text)?'Consultation':'Other';
+ const billType=/\b(pharmacy|pharma|medicines|medical store)\b/i.test(text)||(/\bGSTIN\b/i.test(text)&&/\bMRP\b/i.test(text)&&/\b(?:batch|expiry)\b/i.test(text))?'Pharmacy':/\b(laboratory|diagnostic|pathology|lab)\b/i.test(text)?'Diagnostics':/\b(hospital|nursing\s*home|inpatient|discharge)\b/i.test(text)?'Hospital':/\b(consultation|clinic)\b/i.test(text)?'Consultation':'Other';
  const pageMarker=text.match(/\bpage\s*(\d+)\s*(?:of|\/)\s*(\d+)/i);
  const issues=[];
  if(documentType==='Other')issues.push('Not identified as a bill or receipt');
@@ -54,8 +54,8 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
  const duplicates=new Set(matches.map(m=>m.page)),groups=[];
  signatures.forEach((sig,index)=>{
   const page=index+1;if(duplicates.has(page))return;
-  const text=sig.billingOcr||sig.ocr||'',parsed=extract(text),source=provenance[index]||{fileName:'Document',sourceIndex:0,sourcePage:page};
-  if(sig.billingNeedsReview)parsed.issues.push('OCR uncertain: verify fields');
+  const text=sig.billingOcr||sig.ocr||'',fallback=extract(text),parsed=sig.vision?{...sig.vision,billType:fallback.billType!=='Other'?fallback.billType:sig.vision.billType,issues:[...sig.vision.issues]}:fallback,source=provenance[index]||{fileName:'Document',sourceIndex:0,sourcePage:page};
+  if(sig.billingNeedsReview&&!sig.vision)parsed.issues.push('OCR uncertain: verify fields');
   const previous=groups.at(-1),mark=parsed.pageMarker,priorMark=previous?.lastMarker;
   const continuation=previous&&mark&&priorMark&&mark.total===priorMark.total&&mark.page===priorMark.page+1&&mark.page<=mark.total&&source.sourceIndex===previous.source.sourceIndex&&source.sourcePage===previous.lastSourcePage+1&&parsed.billNo&&parsed.billNo===previous.parsed.billNo&&parsed.billDate&&parsed.billDate===previous.parsed.billDate&&parsed.documentType===previous.parsed.documentType;
   if(continuation){previous.pages.push(page);previous.text+='\n'+text;previous.parsed=extract(previous.text);previous.lastMarker=mark;previous.lastSourcePage=source.sourcePage;}
@@ -64,7 +64,7 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
  const rows=groups.map(group=>{
   const {pageMarker,...parsed}=group.parsed;
   if(pageMarker&&group.pages.length!==pageMarker.total)parsed.issues.push('Incomplete multi-page document: check total');
-  return {...parsed,id:'pages-'+group.pages.join('-'),pages:group.pages,fileName:group.source.fileName,remarks:'',included:parsed.documentType==='Bill'&&!parsed.issues.length,reviewed:false};
+  return {...parsed,id:'pages-'+group.pages.join('-'),pages:group.pages,fileName:group.source.fileName,remarks:parsed.remarks||'',included:parsed.documentType==='Bill'&&!parsed.issues.length,reviewed:false};
  });
  // Same number is a review signal, never proof that two expenses should be merged.
  const keys=new Map();
@@ -76,11 +76,12 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
   const bills=rows.filter(b=>b.documentType==='Bill'&&receipt.referenceNo&&b.billNo.toLowerCase()===receipt.referenceNo.toLowerCase()&&b.currency===receipt.currency);
   if(bills.length===1){receipt.linkedBillId=bills[0].id;receipt.remarks='Paid against '+bills[0].billNo;}
   else receipt.remarks='Unmatched receipt';
-  receipt.included=false;
+  receipt.included=!!(receipt.localAI&&receipt.serviceReceipt&&!receipt.linkedBillId&&!receipt.issues.length);
  }
+ for(const row of rows)if(row.localAI&&row.documentType!=='Other')row.issues.push(...(row.advisories||[]),'AI extraction: verify source');
  return rows;
 }
-export function countsAsExpense(row){return row.documentType==='Bill'||(row.documentType==='Receipt'&&row.reviewed&&!row.linkedBillId);}
+export function countsAsExpense(row){return row.documentType==='Bill'||(row.documentType==='Receipt'&&(row.reviewed||(row.localAI&&row.serviceReceipt))&&!row.linkedBillId);}
 export function summarizeBills(rows){
  let totalCents=0,included=0;const invalid=[];
  for(const row of rows){
@@ -95,7 +96,7 @@ export function billTableData(rows){
  const data=[['Bill no.','Bill date','Bill type','Bill amount','Type','Remarks','Included in bill total','Source pages','Review issues']];
  for(const r of rows.filter(r=>r.documentType!=='Other'))data.push([r.billNo,r.billDate,r.billType,r.amountCents===null?'':r.currency+' '+formatMoney(r.amountCents),r.documentType,r.remarks,r.included&&countsAsExpense(r)&&r.currency==='INR'&&Number.isSafeInteger(r.amountCents)?'Yes':'No',r.pages.join(', '),r.reviewed?'':r.issues.join('; ')]);
  const sum=summarizeBills(rows),incomplete=sum.needsReview>0||rows.some(r=>r.issues.some(i=>i.startsWith('OCR uncertain'))||(r.documentType!=='Other'&&r.amountCents===null));
- data.push(['','',incomplete?'Included bill subtotal':'Draft bill total','INR '+formatMoney(sum.totalCents),'','Bills + reviewed standalone receipts','','',incomplete?'Calculation incomplete: review unread fields':'']);return data;
+ data.push(['','',incomplete?'Included bill subtotal':'Draft bill total','INR '+formatMoney(sum.totalCents),'','Draft expenses; linked payments excluded','','',incomplete?'Calculation incomplete: review unread fields':'']);return data;
 }
 export function spreadsheetText(value){const text=String(value??'').replace(/[\t\r\n]+/g,' ');return /^[\s]*[=+@-]/.test(text)?"'"+text:text;}
 export function tableToTsv(data){return data.map(row=>row.map(spreadsheetText).join('\t')).join('\n');}

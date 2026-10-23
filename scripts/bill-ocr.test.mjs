@@ -5,7 +5,7 @@ test('strong OCR avoids retries; weak OCR chooses strongest orientation and rele
  const strong={data:{confidence:90,text:'clear invoice'}};
  assert.equal(await recoverBillText({},strong,()=>{throw Error('unnecessary render');}),strong);
  const images=[],angles=[];
- const worker={recognize:async image=>({data:{confidence:image.angle===Math.PI/2?92:60,text:'retry'}})};
+ const worker={recognize:async image=>({data:{confidence:image.angle===Math.PI/2?92:60,text:'invoice date total'}})};
  const result=await recoverBillText(worker,{data:{confidence:35,text:'sideways'}},async angle=>{angles.push(angle);const image={width:2200,height:3000,angle};images.push(image);return image;});
  assert.equal(result.data.confidence,92);assert.deepEqual(angles,[0,Math.PI/2]);assert.ok(images.every(image=>image.width===0&&image.height===0));
 });
