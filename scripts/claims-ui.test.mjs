@@ -34,6 +34,7 @@ test('claims UI queues/reorders files, edits totals, restores exclusions, copies
   elements.exportBills.onclick();assert.deepEqual(pagesExported,[1,2]);
   elements.excludedRows.children[0].children[1].onclick();assert.equal(elements.billRows.children.length,3);assert.equal(elements.billCount.textContent,3);assert.equal(elements.billTotal.textContent,'Draft bill total: INR 150.75');
   await elements.copyBills.onclick();assert.ok(copied.includes('Bill no.\tBill date'));assert.ok(copied.includes('INR 150.75'));assert.equal(elements.copyStatus.textContent,'Table copied. Paste into Excel or Sheets.');
+  state.billAIpending=2;workspace.syncLedger();assert.match(elements.billSummary.textContent,/AI still reading 2/);await elements.copyBills.onclick();assert.match(copied,/Provisional subtotal/);state.billAIpending=0;
   clipboard.writeText=async()=>{throw new Error('denied');};await elements.copyBills.onclick();assert.equal(elements.copyFallback.hidden,false);assert.equal(elements.copyFallback.selected,true);
   elements.billsTab.onclick();assert.equal(elements.stage.hidden,true);elements.documentsTab.onclick();assert.equal(elements.stage.hidden,false);
   workspace.resetLedger();assert.equal(elements.billRows.children.length,0);assert.equal(elements.billTotal.textContent,'Draft bill total: INR 0.00');

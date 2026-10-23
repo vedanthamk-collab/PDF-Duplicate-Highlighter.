@@ -14,6 +14,10 @@ test('embedded-text documents never initialize OCR',async()=>{
  await recognizeAll(1,ctx);
  assert.equal(ctx.calls.started,0);
 });
+test('clear medical reports do not trigger high-resolution accounting OCR retries',async()=>{
+ const ctx=context([{embedded:false}]);ctx.worker.recognize=async()=>{ctx.calls.read++;return {data:{text:'Thyroid function test\nResult Normal Ranges\nTSH 2.3',confidence:40}};};
+ await recognizeAll(1,ctx);assert.equal(ctx.calls.read,1);assert.equal(ctx.state.signatures[0].billingNeedsReview,false);
+});
 test('OCR runs without animation frames, skips embedded pages and releases both workers',async()=>{
  const ctx=context([{embedded:true,ocr:'original text'},{embedded:false},{embedded:false}]);
  await recognizeAll(1,ctx);

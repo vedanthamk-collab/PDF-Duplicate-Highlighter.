@@ -1,5 +1,6 @@
 import {initClaims} from './claims-ui.js';
 import {connectLocalReader,normalizeVision} from './local-vision.js';
+import {planBillReading} from './bill-plan.js';
 import {pdfSource} from './pdf-source.js';
 import {recognizeAll as runOcr} from './scanner.js';
 import {findDuplicates} from './matcher.js';
@@ -11,6 +12,7 @@ const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],po
 const cards=new Map();
 let pageObserver=null;
 let localReader=null,visionController=null;
+function cancelActiveAI(){if(visionController){visionController.abort();localReader?.close();localReader=null;}}
 $('stopAI').onclick=()=>{visionController?.abort();localReader?.close();localReader=null;};
 $('useLocalAI').onchange=()=>{if(!$('useLocalAI').checked){visionController?.abort();localReader?.close();localReader=null;$('localAIStatus').textContent='Local AI off. Basic OCR used.';}};
 addEventListener('pagehide',()=>{visionController?.abort();localReader?.close();});
@@ -36,6 +38,7 @@ if(params.has('source')){
  catch(e){status('Portal import failed: '+e.message+'. Download that PDF from the portal and choose it here.');}
 }
 async function openPdf(data,name,provenance=[]){
+ cancelActiveAI();state.billAIpending=0;
  const previousPdf=state.pdf;
  workspace.resetLedger();workspace.setBusy(true);state.scanComplete=false;state.provenance=provenance;
  const run=++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.bytes=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
@@ -142,6 +145,7 @@ function initVirtualPages(run){
 }
 async function scan(){
  if(!state.pdf)return;
+ cancelActiveAI();state.billAIpending=0;
  state.scanComplete=false;workspace.setBusy(true);
  const started=performance.now();
  const run=++state.run;pageObserver?.disconnect();cards.clear();
@@ -167,10 +171,9 @@ async function scan(){
  if(run!==state.run)return;
  await recognizeAll(run);
  if(run!==state.run)return;
- await readBillsVisually(run);
- if(run!==state.run)return;
  state.scanComplete=true;classify();workspace.setBusy(false);
  status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+'s. Review matches before export.');
+ void readBillsVisually(run);
 }
 async function downloadClean(){
  if(!state.pdf||!state.bytes)return;
@@ -197,23 +200,21 @@ async function recognizeAll(run){
 }
 async function readBillsVisually(run){
  if(!$('useLocalAI').checked)return;
+ const queue=planBillReading(state.signatures,state.matches);
+ if(!queue.length){$('localAIStatus').textContent='No unread bill pages need AI.';return;}
  localReader??=connectLocalReader(chrome.runtime);
  const label=$('localAIStatus');
  if(!localReader){label.textContent='Local reader unavailable. Basic OCR used.';return;}
  visionController=new AbortController();const controller=visionController;
+ state.billAIpending=queue.length;workspace.syncLedger();
  $('stopAI').hidden=false;
  try{
   await localReader.request({type:'hello'},controller.signal);
-  const duplicates=new Set(findDuplicates(state.signatures,state.overrides).map(m=>m.page));
-  for(let i=0;i<state.signatures.length;i++){
+  let completed=0;
+  for(const i of queue){
    if(run!==state.run||controller.signal.aborted)break;
-   if(duplicates.has(i+1))continue;
    const sig=state.signatures[i],text=sig.billingOcr||sig.ocr||'';
-   // A test name alone is not enough to skip reading a possible invoice.
-   const financial=/\b(invoice|bill|receipt|memo|payable|net amount|GSTIN|concessions)\b/i.test(text);
-   const clearReport=/\b(claim form|details of bills enclosed|bank account verification|discharge summary|operative notes)\b/i.test(text)||(!financial&&/\b(impression|reference range|normal ranges|normal range|study reveals)\b/i.test(text));
-   if(clearReport)continue;
-   status('Local AI reading page '+(i+1)+' / '+state.signatures.length+'…');label.textContent='Reading page '+(i+1)+' locally…';
+   label.textContent='AI '+(completed+1)+' / '+queue.length+' · page '+(i+1)+'. Review documents while it runs.';
    const page=await state.pdf.getPage(i+1),v=page.getViewport({scale:1});let canvas;
    try{
     canvas=await renderPage(page,Math.min(2.5,1600/v.width),sig.billingRotation||0);
@@ -221,11 +222,12 @@ async function readBillsVisually(run){
     const value=await localReader.request({type:'read',image},controller.signal);
     if(run!==state.run||controller.signal.aborted)return;
     sig.vision=normalizeVision(value);
+    completed++;state.billAIpending=queue.length-completed;workspace.syncLedger();
    }finally{if(canvas){canvas.width=0;canvas.height=0;}}
   }
-  label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI finished. Verify extracted fields.';
- }catch(error){label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI: '+error.message+'. Basic OCR retained.';localReader?.close();localReader=null;}
- finally{visionController=null;$('stopAI').hidden=true;}
+  if(run===state.run)label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI finished. Verify extracted fields.';
+ }catch(error){if(run===state.run){label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI: '+error.message+'. Basic OCR retained.';localReader?.close();localReader=null;}}
+ finally{if(visionController===controller){visionController=null;$('stopAI').hidden=true;if(run===state.run){state.billAIpending=0;workspace.syncLedger();}}}
 }
 
 function downloadAll(){
