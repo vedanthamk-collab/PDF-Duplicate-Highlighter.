@@ -23,10 +23,75 @@ The ZIP downloaded from an Actions artifact may contain an additional parent dir
 
 ```sh
 npm install
+npm test
+# Provision assets/eng.traineddata before building (see below).
 npm run build
 ```
 
 Load the generated `dist/` folder in Chrome. The build bundles local `pdfjs-dist` modules. Never use a CDN for the extension's JavaScript.
+
+The offline model is a build prerequisite. Create `assets/` and download
+[English tessdata_fast](https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata)
+as `assets/eng.traineddata`. GitHub Actions performs this step automatically.
+Use Node.js 22 or newer. `npm test` uses synthetic pages and runs without the OCR model.
+
+## Continue development in Codex
+
+This is the existing repository **vedanthamk-collab/PDF-Duplicate-Highlighter.**
+(including its final period). Clone it; do not create a new repository or initialize
+a new Git history. On Windows give the local folder a name without a trailing period:
+
+```sh
+git clone https://github.com/vedanthamk-collab/PDF-Duplicate-Highlighter..git PDF-Duplicate-Highlighter
+cd PDF-Duplicate-Highlighter
+```
+
+The two periods before `git` are intentional: the first belongs to the repository
+name, and the second begins `.git`. Cloning preserves prior commits, including v0.4.
+If you already have this checkout, open that folder instead of cloning again.
+
+In the desktop app, open/add the checkout folder as a local project and select it
+for Codex. This handoff was cloned into `C:\Users\Kuraganti_V\Documents\ChatGPT\PDF Extension`.
+`AGENTS.md` supplies persistent coding and verification guidance. Changes can be
+reviewed locally, committed on a branch, and submitted to the same GitHub repository.
+The GitHub connector provides repository access; local Git push authentication is
+separate and may require signing in.
+
+For Codex Cloud, connect GitHub, grant access to this exact repository, choose it
+for a cloud environment, review its dependency/setup checks, and publish the
+environment. Use `npm install`, provision the model above, then `npm test` and
+`npm run build`. Start tasks against this existing repository and review pull
+requests before merging. A connected GitHub plugin alone does not create a cloud
+environment.
+
+Official guidance: [desktop app](https://learn.chatgpt.com/docs/app),
+[Codex Cloud](https://learn.chatgpt.com/docs/cloud).
+
+## Current development changes after v0.4
+
+- Production matching and clean export are separate modules covered by executable
+  regression tests. Pull requests run the same tests as main-branch builds.
+- Matching document identifiers or CRP values now requires near-identical word
+  content and complete agreement on recognized numeric tokens, including single
+  digits. A shared patient ID alone is insufficient. This conservative rule can
+  miss duplicate scans when OCR misreads a number; it does not guarantee accuracy.
+- Text fingerprints are prepared once per page, rather than once per comparison.
+  Documents with embedded text on every page avoid starting OCR workers entirely.
+- Superseded PDF loads and OCR results are prevented from overwriting a newer load.
+- Clean export tests verify retained page order, original bytes, no added
+  annotations, repeated duplicate entries, and invalid page numbers.
+
+No twofold speed improvement has been measured. Scanning still belongs to the
+viewer tab: switching tabs has no explicit animation-frame wait, but discard,
+browser shutdown and recovery remain unimplemented. Dedicated workers alone do
+not solve those lifecycle cases. Next validation should use real Chrome with
+visibility changes, discard, cancellation and large mixed scanned/text PDFs.
+The prior chat's PDFs are not committed; synthetic regressions do not establish
+accuracy on those documents. Benchmark against a human-labeled local sample
+before changing automatic-removal thresholds further.
+
+The sections below describe earlier releases; v0.4 and the current notes above
+supersede older marked-export and no-OCR descriptions.
 
 ## Matching behavior
 
@@ -66,3 +131,44 @@ The extension does **not** guarantee perfect accuracy. In particular: faint carb
 - Speed varies by machine, PDF dimensions, number of OCR-heavy pages and Chrome resource limits; **2× is a target, not a guaranteed benchmark**.
 - Before removing pages, verify each confirmed match. False-positive matches can cause a necessary document to be excluded from the *new* copy. Use the Not duplicate action to undo an incorrect match.
 
+
+## Interface theme and local development
+
+The viewer and popup use a Plum-inspired aubergine, cream and coral palette, serif headlines, and rounded controls based on https://www.plumhq.com/ (reviewed 22 October 2026). This is an independent project, not affiliated with or endorsed by Plum. No company logo, remote fonts, analytics, or website assets are loaded.
+
+Use Node.js 22 or newer. Before building, provision the offline English model:
+
+```sh
+npm install
+mkdir -p assets
+curl --fail --location https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata -o assets/eng.traineddata
+npm test
+npm run build
+```
+
+The build packages `assets/eng.traineddata` locally. Do not commit the downloaded model or user PDFs. Tests call the production matcher and clean-export functions using synthetic documents. Theme changes preserve the v0.4 two-worker OCR, embedded-text shortcut, lazy page previews, page navigation and clean export. No new speed or tab-discard reliability claim is made.
+
+### If selecting a PDF does nothing
+
+Load the **built `dist/` directory**, not this source directory: both contain a manifest, but only `dist/` contains the bundled PDF libraries. After replacing a build, reload the extension at `chrome://extensions` and open a fresh viewer tab. The viewer now reports module startup failures instead of silently leaving file selection disconnected.
+
+Import current PDF URL supports direct HTTP(S) and local `file://` PDF tabs. For local-tab import, Chrome requires **Allow access to file URLs** on the extension’s Details page. Choosing a saved PDF in the viewer does not require that setting. Embedded/blob PDF viewers and protected portal pages may not expose a downloadable URL; save the PDF and choose it locally instead.
+
+`npm run build` also provisions the ignored `vendor/` directory beside the source manifest. This supports existing unpacked installations loaded from the source folder; `dist/` remains the recommended distributable. Neither location can run before its bundled assets have been built.
+
+Verified in Chrome on 22 October 2026: the existing unpacked source-folder installation failed with `ERR_FILE_NOT_FOUND` for PDF.js, PDF-lib and Tesseract. After building the generated libraries into that folder and reloading the extension, the viewer reached Ready; selecting a synthetic three-page PDF rendered the document and completed analysis with two duplicates referring to page 1. This verifies the local file-selection path; tab-discard recovery and protected portal imports are not covered by this check.
+
+## Background rendering fix and measured performance (22 October 2026)
+
+PDF.js 4.10.38 internally schedules display rendering with `requestAnimationFrame`. Removing animation-frame waits from the viewer alone did not remove this dependency: thumbnail preparation and OCR-image rendering could stall in a hidden Chrome tab. The build now applies one guarded change to the bundled PDF.js scheduler, using its existing promise-based continuation for display rendering. Display intent, annotations, optional layers, page scales, OCR resolution and matching thresholds are unchanged. A future PDF.js upgrade must explicitly review the patch if the expected scheduling point changes.
+
+Measured in the user's installed Chrome, using identical generated 24-page PDFs at scale 0.75:
+
+| Rendering case | Before | Updated | Evidence |
+| --- | --- | --- | --- |
+| Foreground, median of 3 alternating runs | 517 ms | 401 ms | About 22% less rendering time; raw runs before 503/577/517, updated 401/405/343 ms |
+| Hidden tab, one paired run | 33,209 ms | 1,056 ms | Both started hidden. Updated completed all 24 pages while hidden; baseline completed 0 pages while hidden and finished after tab restoration |
+
+These timings cover rendering only, excluding OCR, matching and export. They do not establish a 2x end-to-end speedup on arbitrary scans. The hidden baseline time depends on how long the tab remains hidden. OCR-heavy documents can still take substantial time. The viewer now reports total elapsed scan time on completion. Chrome tab discard, browser shutdown and memory pressure remain limitations; this change does not introduce a persistent scanning service.
+
+To reproduce: run `npm run build`, then `node scripts/prepare-render-benchmark.mjs`. From the source-folder unpacked extension, open `chrome-extension://<extension-id>/benchmarks/render.html`. Foreground runs alternate engine order; the hidden test starts both engines on the actual visibility transition. Switch away, wait about 15 seconds, then return. All fixtures are generated locally; no user PDFs are read. `npm test` additionally renders a real synthetic PDF (including a form value) through both engines, asserts identical page pixels and unchanged source bytes, and verifies the updated engine completes when animation frames throw.

@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-22",
+  "fixture": "24 generated pages, 65 text rows and rules per page, scale 0.75",
+  "scope": "Rendering only, excluding OCR, classification and export",
+  "foreground": {"before_ms": [503,577,517], "updated_ms": [401,405,343], "median_reduction_percent": 22.44},
+  "hidden": {"before": {"ms":33209,"hiddenPages":0,"visibilityAtStart":"hidden"}, "updated": {"ms":1056,"hiddenPages":24,"visibilityAtStart":"hidden"}},
+  "limits": "One hidden paired run. Baseline elapsed depends on time until tab restoration. No full-scan 2x claim or tab-discard guarantee."
+}

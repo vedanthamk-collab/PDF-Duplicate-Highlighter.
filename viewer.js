@@ -1,3 +1,7 @@
+import {pdfSource} from './pdf-source.js';
+import {recognizeAll as runOcr} from './scanner.js';
+import {findDuplicates} from './matcher.js';
+import {createCleanPdf} from './export.js';
 import * as pdfjsLib from './vendor/pdf.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc=chrome.runtime.getURL('vendor/pdf.worker.mjs');
 const $=id=>document.getElementById(id);
@@ -11,7 +15,7 @@ const mode=()=>MODE[Number($('threshold').value)];
 $('threshold').oninput=()=>{$('thresholdLabel').textContent=mode().name;};
 $('threshold').onchange=()=>{if(state.signatures.length)classify();};
 $('possible').onchange=renderMarks;
-$('file').onchange=async e=>{const f=e.target.files?.[0];if(f)await openPdf(await f.arrayBuffer(),f.name);e.target.value='';};
+$('file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;status('Opening '+f.name+'…');try{await openPdf(await f.arrayBuffer(),f.name);}catch(err){status('Unable to read selected file: '+err.message);}finally{e.target.value='';}};
 $('rescan').onclick=()=>scan();
 $('jumpForm').onsubmit=e=>{e.preventDefault();const n=Number($('jump').value);if(!Number.isInteger(n)||n<1||n>cards.size){$('jumpStatus').textContent='Enter a page from 1 to '+cards.size;return;}cards.get(n).scrollIntoView({behavior:'smooth',block:'start'});$('jumpStatus').textContent='Page '+n+' of '+cards.size;};
 $('export').onclick=downloadClean;
@@ -20,14 +24,14 @@ function status(message){$('progress').textContent=message;}
 const params=new URLSearchParams(location.search);
 if(params.has('source')){
  const url=params.get('source');status('Importing PDF link…');
- try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw Error('Unsupported URL');const r=await fetch(u.toString(),{credentials:'include'});if(!r.ok)throw Error('HTTP '+r.status);await openPdf(await r.arrayBuffer(),decodeURIComponent(u.pathname.split('/').pop()||'portal.pdf'));}
+ try{const u=new URL(pdfSource(url));const r=await fetch(u.toString(),{credentials:'include'});if(!r.ok)throw Error('HTTP '+r.status);await openPdf(await r.arrayBuffer(),decodeURIComponent(u.pathname.split('/').pop()||'portal.pdf'));}
  catch(e){status('Portal import failed: '+e.message+'. Download that PDF from the portal and choose it here.');}
 }
 async function openPdf(data,name){
- ++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
+ const run=++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
  $('pages').replaceChildren();$('matches').replaceChildren();$('placeholder').hidden=true;$('export').disabled=true;$('rescan').disabled=true;
- try{state.bytes=new Uint8Array(data);state.pdf=await pdfjsLib.getDocument({data:state.bytes.slice()}).promise;state.name=name;await scan();}
- catch(err){status('Unable to load PDF: '+err.message);$('stats').textContent='Could not read PDF';console.error(err);}
+ try{const bytes=new Uint8Array(data);const pdf=await pdfjsLib.getDocument({data:bytes.slice()}).promise;if(run!==state.run){await pdf.destroy();return;}state.bytes=bytes;state.pdf=pdf;state.name=name;await scan();}
+ catch(err){if(run!==state.run)return;status('Unable to load PDF: '+err.message);$('stats').textContent='Could not read PDF';console.error(err);}
 }
 async function renderPage(page,scale){
  const v=page.getViewport({scale});const c=document.createElement('canvas');c.width=Math.ceil(v.width);c.height=Math.ceil(v.height);
@@ -58,110 +62,9 @@ function textTokens(content){
  const words=raw.match(/[a-z0-9]+/g)||[];
  return words.length>=15?words:null;
 }
-function compareImages(a,b){
- if(a.w!==b.w||a.h!==b.h)return 0;
- const n=a.gray.length;
- // Whole-page light similarity alone is unsafe for sparse reports. Compare printed foreground overlap.
- let overlap=0,union=0,changes=0,fgDiff=0,filledA=0,filledB=0;
- for(let i=0;i<n;i++){
-  const x=a.dark[i],y=b.dark[i];if(x)filledA++;if(y)filledB++;
-  if(x&&y)overlap++;if(x||y){union++;fgDiff+=Math.abs(a.gray[i]-b.gray[i]);}
-  if(x!==y)changes++;
- }
- if(union<180||Math.min(filledA,filledB)/Math.max(filledA,filledB||1)<.7)return 0;
- const iou=overlap/union,balanced=2*overlap/(filledA+filledB);
- const agreement=1-changes/union;
- return Math.min(iou,balanced,agreement);
-}
-function compareText(a,b){
- if(!a||!b)return null;
- const fa=new Map(),fb=new Map();
- for(const t of a)fa.set(t,(fa.get(t)||0)+1);
- for(const t of b)fb.set(t,(fb.get(t)||0)+1);
- let intersection=0,totalA=0,totalB=0;
- for(const v of fa.values())totalA+=v;
- for(const v of fb.values())totalB+=v;
- for(const [k,v] of fa)intersection+=Math.min(v,fb.get(k)||0);
- return (2*intersection)/(totalA+totalB);
-}
-function similarity(a,b){
- const ta=compareText(a.text,b.text);
- let visual=0;
- // Rotate only one scan relative to the other; full 0/90/180/270° candidates.
- for(const r of b.rotations){const value=compareImages(a.rotations[0],r);if(value>visual)visual=value;}
- return {visual,semantic:ta};
-}
-function fingerprint(text){
- const raw=(text||'').toLowerCase().replace(/[^a-z0-9./\s-]/g,' ');
- const words=(raw.match(/[a-z]{2,}|\d+(?:[./-]\d+)*/g)||[]);
- const counts=new Map(),numbers=new Map();
- for(const word of words){counts.set(word,(counts.get(word)||0)+1);if(/\d/.test(word)&&word.length>=2)numbers.set(word,(numbers.get(word)||0)+1);}
- return {words,counts,numbers};
-}
-function overlap(a,b){
- let common=0,na=0,nb=0;
- for(const v of a.values())na+=v;for(const v of b.values())nb+=v;
- for(const [k,v] of a)common+=Math.min(v,b.get(k)||0);
- return na+nb?2*common/(na+nb):0;
-}
-function extractedIds(raw){
- const cleaned=(raw||'').toLowerCase().replace(/\s+/g,' ');
- const out={};
- for(const [kind,re] of [
-  ['invoice',/(?:invoice|bill)\s*(?:no|number|#|:|\.){0,8}\s*[:.#-]?\s*([0-9-]{8,})/],
-  ['patient',/(?:patient\s*id|lab\s*no)\s*[:.#-]?\s*([0-9-]{8,})/]
- ]){const match=cleaned.match(re);if(match)out[kind]=match[1].replace(/-/g,'');}
- return out;
-}
-function identityConflict(a,b){
- const x=extractedIds(a.ocr),y=extractedIds(b.ocr);
- for(const key of ['invoice','patient']){
-  if(x[key]&&y[key]&&x[key]!==y[key])return true;
- }
- return false;
-}
-function clinicalValue(text){
- const raw=(text||'').toLowerCase().replace(/\s+/g,' ');
- // Explicit value attached to named investigation. Shared lab form headings aren't enough.
- const match=raw.match(/\bcrp\b\s*[:=-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:mg|\/|mgl|$)/)
-  ||raw.match(/\bcrp\b\s*[:=-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)(?=\s)/);
- return match?['crp',match[1].replace(',','.')]:null;
-}
 function classify(){
- state.matches=[];state.possible=[];const originals=[];
- for(let i=0;i<state.signatures.length;i++){
-  const current=state.signatures[i],currentText=fingerprint(current.ocr||'');
-  const currentIds=extractedIds(current.ocr||'');let best=null;
-  for(const j of originals){
-   const ref=state.signatures[j],ids=extractedIds(ref.ocr||'');
-   if(identityConflict(current,ref))continue;
-   const source=fingerprint(ref.ocr||'');
-   if(currentText.words.length<24||source.words.length<24)continue;
-   const word=overlap(currentText.counts,source.counts);
-   const nums=overlap(currentText.numbers,source.numbers);
-   const sameInvoice=!!(currentIds.invoice&&ids.invoice&&currentIds.invoice===ids.invoice);
-   const samePatient=!!(currentIds.patient&&ids.patient&&currentIds.patient===ids.patient);
-   const sameType=/(ha?ematology|biochemistry|serology|crp|cbc)/i.test(current.ocr)&&
-       /(ha?ematology|biochemistry|serology|crp|cbc)/i.test(ref.ocr);
-   const valueA=clinicalValue(current.ocr),valueB=clinicalValue(ref.ocr);
-   const clinicalEqual=!!(valueA&&valueB&&valueA[0]===valueB[0]&&valueA[1]===valueB[1]);
-   const clinicalConflict=!!(valueA&&valueB&&valueA[0]===valueB[0]&&valueA[1]!==valueB[1]);
-   if(clinicalConflict)continue;
-   // Matching invoice numbers have more evidentiary weight than shared layouts.
-   const invoiceMatch=sameInvoice&&word>=.63&&nums>=.63;
-   const medicalMatch=samePatient&&sameType&&word>=.65&&nums>=.80;
-   const clinicalMatch=clinicalEqual&&word>=.72&&nums>=.69;
-   const genericMatch=!sameInvoice&&!samePatient&&!clinicalEqual&&word>=.965&&nums>=.965&&similarity(current,ref).visual>=.90;
-   if(!(invoiceMatch||medicalMatch||clinicalMatch||genericMatch))continue;
-   const score=word*.5+nums*.5;
-   if(!best||score>best.score)best={original:j+1,score};
-  }
-  const override=state.overrides.get(i+1);
-  if(override?.type==='confirm'){state.matches.push({page:i+1,original:override.original,manual:true});continue;}
-  if(override?.type==='reject'){originals.push(i);continue;}
-  if(best){state.matches.push({page:i+1,original:best.original,score:best.score});continue;}
-  originals.push(i);
- }
+ state.matches=findDuplicates(state.signatures,state.overrides);
+ state.possible=[];
  showResults();
 }
 function markManual(page,original,confirmed){
@@ -183,7 +86,7 @@ function showResults(){
   const reject=document.createElement('button');reject.className='small';reject.textContent='Not duplicate';reject.onclick=()=>markManual(m.page,m.original,false);
   box.append(go,confirm,reject);parent.append(box);
  }
- if(!state.matches.length&&!state.possible.length)parent.textContent='No duplicates found. Scans with changed content may require manual checking.';
+ if(!state.matches.length&&!state.possible.length)parent.textContent='No duplicates found. Review pages if needed.';
  renderMarks();$('rescan').disabled=false;$('export').disabled=false;
 }
 function renderMarks(){
@@ -228,6 +131,7 @@ function initVirtualPages(run){
 }
 async function scan(){
  if(!state.pdf)return;
+ const started=performance.now();
  const run=++state.run;pageObserver?.disconnect();cards.clear();
  state.signatures=[];state.matches=[];state.possible=[];state.ocrReady=false;
  $('pages').replaceChildren();$('matches').replaceChildren();$('rescan').disabled=true;$('export').disabled=true;
@@ -246,13 +150,13 @@ async function scan(){
    state.signatures.push(sig);
    mini.width=0;mini.height=0;
    // Do not wait for animation frames: they pause when the tab is hidden.
-  }catch(err){status('Could not prepare page '+n+': '+err.message);console.error(err);return;}
+  }catch(err){if(run!==state.run)return;status('Could not prepare page '+n+': '+err.message);$('rescan').disabled=false;console.error(err);return;}
  }
  if(run!==state.run)return;
  await recognizeAll(run);
  if(run!==state.run)return;
  classify();
- status('Analysis complete. Review the duplicates list before downloading the cleaned PDF.');
+ status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+'s. Review matches before export.');
 }
 async function downloadClean(){
  if(!state.pdf||!state.bytes)return;
@@ -265,10 +169,7 @@ async function downloadClean(){
  try{
   status('Saving clean PDF…');
   const {PDFDocument}=globalThis.PDFLib;
-  const pdf=await PDFDocument.load(state.bytes,{ignoreEncryption:false});
-  // Descending indices ensure that original page numbers are preserved during deletion.
-  for(const n of duplicates.slice().reverse())pdf.removePage(n-1);
-  const data=await pdf.save({useObjectStreams:true});
+  const data=await createCleanPdf(PDFDocument,state.bytes,state.matches);
   const blob=new Blob([data],{type:'application/pdf'}),url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\.pdf$/i,'')+'-without-duplicates.pdf';
   document.body.append(a);a.click();a.remove();
@@ -278,40 +179,5 @@ async function downloadClean(){
  finally{button.disabled=false;}
 }
 async function recognizeAll(run){
- if(typeof Tesseract==='undefined'){status('Offline OCR unavailable; using embedded PDF text where available.');return;}
- // Two workers process separate pages concurrently; tune conservatively to avoid memory spikes.
- const workerCount=Math.min(2,Math.max(1,navigator.hardwareConcurrency||2));
- const workers=[];
- try{
-  status('Starting offline OCR ('+workerCount+' workers)…');
-  for(let n=0;n<workerCount;n++){
-   workers.push(await Tesseract.createWorker('eng',1,{
-    workerPath:chrome.runtime.getURL('vendor/ocr/worker.min.js'),
-    corePath:chrome.runtime.getURL('vendor/ocr/'),
-    langPath:chrome.runtime.getURL('vendor/ocr/'),
-    gzip:false,workerBlobURL:false
-   }));
-  }
-  state.ocrReady=true;
-  let cursor=0,done=0;
-  async function consume(worker){
-   for(;;){
-    const i=cursor++;if(i>=state.signatures.length||run!==state.run)return;
-    const sig=state.signatures[i];
-    if(sig.embedded){done++;continue;} // embedded selectable text is already available
-    let image;
-    try{
-     const page=await state.pdf.getPage(i+1),viewport=page.getViewport({scale:1});
-     image=await renderPage(page,Math.min(1.5,1100/viewport.width));
-     const result=await worker.recognize(image);
-     sig.ocr=result?.data?.text||sig.ocr;
-    }catch(err){console.warn('OCR failed for page '+(i+1),err);}
-    finally{if(image){image.width=0;image.height=0;}}
-    done++;
-    status('Reading document '+done+' / '+state.signatures.length+' pages (fast parallel OCR)');
-   }
-  }
-  await Promise.all(workers.map(consume));
- }catch(err){console.error('OCR startup failed',err);status('OCR unavailable: '+err.message);}
- finally{await Promise.allSettled(workers.map(w=>w.terminate()));}
+ return runOcr(run,{state,status,Tesseract:globalThis.Tesseract,chrome,navigator,renderPage});
 }

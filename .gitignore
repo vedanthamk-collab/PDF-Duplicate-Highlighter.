@@ -1,0 +1,6 @@
+node_modules/
+dist/
+assets/*.traineddata
+*.pdf
+vendor/
+benchmarks/pdf-baseline.mjs
