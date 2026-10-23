@@ -38,6 +38,7 @@ export async function recognizeAll(run, {state, status, Tesseract, chrome, navig
      },()=>run===state.run);
      if(run!==state.run)return;
      sig.billingOcr=recovered?.data?.text||sig.ocr;
+     sig.billingRotation=(recovered?.recoveryAngle||0)*180/Math.PI;
      sig.billingNeedsReview=Number.isFinite(recovered?.data?.confidence)&&recovered.data.confidence<75;
     }catch(err){console.warn('OCR failed for page '+(i+1),err);}
     finally{if(image){image.width=0;image.height=0;}}

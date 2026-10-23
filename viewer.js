@@ -1,4 +1,5 @@
 import {initClaims} from './claims-ui.js';
+import {connectLocalReader,normalizeVision} from './local-vision.js';
 import {pdfSource} from './pdf-source.js';
 import {recognizeAll as runOcr} from './scanner.js';
 import {findDuplicates} from './matcher.js';
@@ -9,6 +10,10 @@ const $=id=>document.getElementById(id);
 const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false,scanComplete:false,provenance:[]};
 const cards=new Map();
 let pageObserver=null;
+let localReader=null,visionController=null;
+$('stopAI').onclick=()=>{visionController?.abort();localReader?.close();localReader=null;};
+$('useLocalAI').onchange=()=>{if(!$('useLocalAI').checked){visionController?.abort();localReader?.close();localReader=null;$('localAIStatus').textContent='Local AI off. Basic OCR used.';}};
+addEventListener('pagehide',()=>{visionController?.abort();localReader?.close();});
 const workspace=initClaims({getState:()=>state,onMerged:openPdf,onBillsDownload:downloadBills,onClear:()=>location.replace(chrome.runtime.getURL('viewer.html')),showDocument:n=>cards.get(n)?.scrollIntoView({behavior:'smooth',block:'start'})});
 // Scanner does not await requestAnimationFrame: browsers suspend it in hidden tabs.
 const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
@@ -162,6 +167,8 @@ async function scan(){
  if(run!==state.run)return;
  await recognizeAll(run);
  if(run!==state.run)return;
+ await readBillsVisually(run);
+ if(run!==state.run)return;
  state.scanComplete=true;classify();workspace.setBusy(false);
  status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+'s. Review matches before export.');
 }
@@ -187,6 +194,38 @@ async function downloadClean(){
 }
 async function recognizeAll(run){
  return runOcr(run,{state,status,Tesseract:globalThis.Tesseract,chrome,navigator,renderPage});
+}
+async function readBillsVisually(run){
+ if(!$('useLocalAI').checked)return;
+ localReader??=connectLocalReader(chrome.runtime);
+ const label=$('localAIStatus');
+ if(!localReader){label.textContent='Local reader unavailable. Basic OCR used.';return;}
+ visionController=new AbortController();const controller=visionController;
+ $('stopAI').hidden=false;
+ try{
+  await localReader.request({type:'hello'},controller.signal);
+  const duplicates=new Set(findDuplicates(state.signatures,state.overrides).map(m=>m.page));
+  for(let i=0;i<state.signatures.length;i++){
+   if(run!==state.run||controller.signal.aborted)break;
+   if(duplicates.has(i+1))continue;
+   const sig=state.signatures[i],text=sig.billingOcr||sig.ocr||'';
+   // A test name alone is not enough to skip reading a possible invoice.
+   const financial=/\b(invoice|bill|receipt|memo|payable|net amount|GSTIN|concessions)\b/i.test(text);
+   const clearReport=/\b(claim form|details of bills enclosed|bank account verification|discharge summary|operative notes)\b/i.test(text)||(!financial&&/\b(impression|reference range|normal ranges|normal range|study reveals)\b/i.test(text));
+   if(clearReport)continue;
+   status('Local AI reading page '+(i+1)+' / '+state.signatures.length+'…');label.textContent='Reading page '+(i+1)+' locally…';
+   const page=await state.pdf.getPage(i+1),v=page.getViewport({scale:1});let canvas;
+   try{
+    canvas=await renderPage(page,Math.min(2.5,1600/v.width),sig.billingRotation||0);
+    const image=canvas.toDataURL('image/jpeg',.9).split(',')[1];
+    const value=await localReader.request({type:'read',image},controller.signal);
+    if(run!==state.run||controller.signal.aborted)return;
+    sig.vision=normalizeVision(value);
+   }finally{if(canvas){canvas.width=0;canvas.height=0;}}
+  }
+  label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI finished. Verify extracted fields.';
+ }catch(error){label.textContent=controller.signal.aborted?'AI stopped. Partial results need review.':'Local AI: '+error.message+'. Basic OCR retained.';localReader?.close();localReader=null;}
+ finally{visionController=null;$('stopAI').hidden=true;}
 }
 
 function downloadAll(){
