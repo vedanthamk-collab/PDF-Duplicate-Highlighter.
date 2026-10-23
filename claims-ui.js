@@ -1,10 +1,10 @@
 import {mergeDocuments,jpegNeedsOrientation} from './documents.js';
 import {buildBillLedger,summarizeBills,moneyToCents,formatMoney,billTableData,tableToTsv,tableToHtml} from './billing.js';
 const $=id=>document.getElementById(id);
-export function initClaims({getState,onMerged,showDocument,onBillsDownload}){
- const files=[],edits=new Map();let rows=[],manual=[],busy=false,tab='documents',revision=0;
+export function initClaims({getState,onMerged,showDocument,onBillsDownload,onClear}){
+ const files=[],edits=new Map();let rows=[],manual=[],busy=false,tab='documents',revision=0,billingRequested=false;
  function setTab(value){tab=value;$('workspaceMain').className=value==='bills'?'billing-mode':'';$('stage').hidden=value!=='documents';$('billView').hidden=value!=='bills';$('documentsTab').setAttribute('aria-selected',String(value==='documents'));$('billsTab').setAttribute('aria-selected',String(value==='bills'));}
- $('documentsTab').onclick=()=>setTab('documents');$('billsTab').onclick=()=>setTab('bills');
+ $('documentsTab').onclick=()=>setTab('documents');$('billsTab').onclick=()=>{billingRequested=true;syncLedger();setTab('bills');};
  function queue(){
   $('fileQueue').replaceChildren();$('queueCount').textContent=files.length+' file'+(files.length===1?'':'s');
   files.forEach((file,index)=>{
@@ -15,10 +15,10 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload}){
    }
    $('fileQueue').append(item);
   });
-  $('mergeScan').disabled=busy||!files.length;$('clearQueue').disabled=busy||!files.length;$('file').disabled=busy;
+  $('mergeScan').disabled=busy||!files.length;$('clearQueue').disabled=busy||(!files.length&&!getState().bytes);$('file').disabled=busy;
  }
  function addFiles(selected){if(busy)return;files.push(...Array.from(selected));setTab('documents');queue();$('uploadQueue').open=true;}
- $('clearQueue').onclick=()=>{files.length=0;queue();};
+ $('clearQueue').onclick=()=>{if(busy)return;files.length=0;resetLedger();queue();onClear();};
  for(const target of [$('stage'),$('billView')]){
   target.addEventListener('dragover',e=>{e.preventDefault();});
   target.addEventListener('drop',e=>{e.preventDefault();addFiles(e.dataTransfer.files);});
@@ -75,10 +75,11 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload}){
   $('billEmpty').hidden=rows.some(r=>r.documentType!=='Other');summary();
  }
  function syncLedger(){
-  const s=getState();rows=buildBillLedger(s.signatures,s.provenance,s.matches).map(row=>({...row,...(edits.get(row.id)||{})})).concat(manual);
+  const s=getState();if(!billingRequested||!s.scanComplete)return;
+  rows=buildBillLedger(s.signatures,s.provenance,s.matches).map(row=>({...row,...(edits.get(row.id)||{})})).concat(manual);
   $('billCount').textContent=rows.filter(r=>r.documentType!=='Other').length;revision++;render();
  }
- function resetLedger(){edits.clear();manual=[];rows=[];revision++;render();setTab('documents');}
+ function resetLedger(){billingRequested=false;edits.clear();manual=[];rows=[];revision++;render();setTab('documents');}
  $('exportBills').onclick=()=>onBillsDownload(rows.filter(r=>r.documentType!=='Other').flatMap(r=>r.pages));
  $('addBill').onclick=()=>{const row={id:'manual-'+crypto.randomUUID(),pages:[],fileName:'Manual entry',billNo:'',referenceNo:'',billDate:'',billType:'Other',amountCents:null,currency:'INR',documentType:'Bill',remarks:'',included:false,reviewed:false,issues:['Manual entry: check amount and inclusion']};manual.push(row);rows.push(row);render();};
  $('copyBills').onclick=async()=>{
