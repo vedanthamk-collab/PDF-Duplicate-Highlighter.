@@ -1,3 +1,4 @@
+import {mergeDocuments} from '../documents.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
@@ -55,4 +56,14 @@ test('real PDF.js renders identical pixels without animation frames, including f
   assert.deepEqual(actual,expected);
   assert.deepEqual(bytes,original);
  }finally{if(previousWindow===undefined)delete globalThis.window;else globalThis.window=previousWindow;await rm(dir,{recursive:true,force:true});}
+});
+
+test('merged PDF form appearances and image pixels survive the production merger',async()=>{
+ const baseline=await import(pathToFileURL(pdfjsPath).href);
+ const bytes=await fixture(),original=await raster(baseline,bytes);
+ const canvas=createCanvas(40,60);const ctx=canvas.getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,40,60);
+ const merged=await mergeDocuments(PDFDocument,[{name:'image.png',bytes:new Uint8Array(canvas.toBuffer('image/png'))},{name:'form.pdf',bytes}]);
+ const actual=await raster(baseline,merged.bytes);
+ assert.deepEqual(actual.slice(1),original);
+ assert.equal(actual[0][0],255);assert.equal(actual[0][1],0);assert.equal(actual[0][2],0);
 });

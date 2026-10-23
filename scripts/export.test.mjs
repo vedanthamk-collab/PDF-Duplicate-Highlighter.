@@ -22,3 +22,12 @@ test('no matches preserves every page',async()=>{
 test('rejects invalid duplicate pages and protects first original',async()=>{
  for(const page of [0,1,8,2.5,NaN])await assert.rejects(createCleanPdf(PDFDocument,await fixture(),[{page}]));
 });
+
+test('bill-page export can exclude a non-bill first page and preserves original order and bytes',async()=>{
+ const {createSelectedPdf}=await import('../export.js');
+ const bytes=await fixture(),before=bytes.slice();
+ const selected=await PDFDocument.load(await createSelectedPdf(PDFDocument,bytes,[6,2,4,2]));
+ assert.deepEqual(selected.getPages().map(p=>p.getWidth()),[302,304,306]);assert.deepEqual(bytes,before);
+ await assert.rejects(createSelectedPdf(PDFDocument,bytes,[]),/No bill/);
+ for(const page of [0,8,1.5])await assert.rejects(createSelectedPdf(PDFDocument,bytes,[page]));
+});

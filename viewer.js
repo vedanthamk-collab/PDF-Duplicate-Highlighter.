@@ -1,13 +1,15 @@
+import {initClaims} from './claims-ui.js';
 import {pdfSource} from './pdf-source.js';
 import {recognizeAll as runOcr} from './scanner.js';
 import {findDuplicates} from './matcher.js';
-import {createCleanPdf} from './export.js';
+import {createCleanPdf,createSelectedPdf} from './export.js';
 import * as pdfjsLib from './vendor/pdf.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc=chrome.runtime.getURL('vendor/pdf.worker.mjs');
 const $=id=>document.getElementById(id);
-const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false};
+const state={pdf:null,bytes:null,name:'document.pdf',signatures:[],matches:[],possible:[],overrides:new Map(),run:0,ocrReady:false,scanComplete:false,provenance:[]};
 const cards=new Map();
 let pageObserver=null;
+const workspace=initClaims({getState:()=>state,onMerged:openPdf,onBillsDownload:downloadBills,showDocument:n=>cards.get(n)?.scrollIntoView({behavior:'smooth',block:'start'})});
 // Scanner does not await requestAnimationFrame: browsers suspend it in hidden tabs.
 const MODE=[{name:'High accuracy'},{name:'High accuracy'},{name:'High accuracy'}];
 $('threshold').value='0';
@@ -15,10 +17,11 @@ const mode=()=>MODE[Number($('threshold').value)];
 $('threshold').oninput=()=>{$('thresholdLabel').textContent=mode().name;};
 $('threshold').onchange=()=>{if(state.signatures.length)classify();};
 $('possible').onchange=renderMarks;
-$('file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;status('Opening '+f.name+'…');try{await openPdf(await f.arrayBuffer(),f.name);}catch(err){status('Unable to read selected file: '+err.message);}finally{e.target.value='';}};
+$('file').onchange=e=>{workspace.addFiles(e.target.files||[]);e.target.value='';};
 $('rescan').onclick=()=>scan();
 $('jumpForm').onsubmit=e=>{e.preventDefault();const n=Number($('jump').value);if(!Number.isInteger(n)||n<1||n>cards.size){$('jumpStatus').textContent='Enter a page from 1 to '+cards.size;return;}cards.get(n).scrollIntoView({behavior:'smooth',block:'start'});$('jumpStatus').textContent='Page '+n+' of '+cards.size;};
 $('export').onclick=downloadClean;
+$('exportAll').onclick=downloadAll;
 
 function status(message){$('progress').textContent=message;}
 const params=new URLSearchParams(location.search);
@@ -27,11 +30,14 @@ if(params.has('source')){
  try{const u=new URL(pdfSource(url));const r=await fetch(u.toString(),{credentials:'include'});if(!r.ok)throw Error('HTTP '+r.status);await openPdf(await r.arrayBuffer(),decodeURIComponent(u.pathname.split('/').pop()||'portal.pdf'));}
  catch(e){status('Portal import failed: '+e.message+'. Download that PDF from the portal and choose it here.');}
 }
-async function openPdf(data,name){
- const run=++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
+async function openPdf(data,name,provenance=[]){
+ const previousPdf=state.pdf;
+ workspace.resetLedger();workspace.setBusy(true);state.scanComplete=false;state.provenance=provenance;
+ const run=++state.run;pageObserver?.disconnect();pageObserver=null;state.pdf=null;state.bytes=null;state.signatures=[];state.matches=[];state.possible=[];state.overrides.clear();cards.clear();
  $('pages').replaceChildren();$('matches').replaceChildren();$('placeholder').hidden=true;$('export').disabled=true;$('rescan').disabled=true;
- try{const bytes=new Uint8Array(data);const pdf=await pdfjsLib.getDocument({data:bytes.slice()}).promise;if(run!==state.run){await pdf.destroy();return;}state.bytes=bytes;state.pdf=pdf;state.name=name;await scan();}
+ try{if(previousPdf)await previousPdf.destroy();const bytes=new Uint8Array(data);const pdf=await pdfjsLib.getDocument({data:bytes.slice()}).promise;if(run!==state.run){await pdf.destroy();return;}state.bytes=bytes;state.pdf=pdf;state.name=name;await scan();}
  catch(err){if(run!==state.run)return;status('Unable to load PDF: '+err.message);$('stats').textContent='Could not read PDF';console.error(err);}
+ finally{workspace.setBusy(false);}
 }
 async function renderPage(page,scale){
  const v=page.getViewport({scale});const c=document.createElement('canvas');c.width=Math.ceil(v.width);c.height=Math.ceil(v.height);
@@ -65,7 +71,7 @@ function textTokens(content){
 function classify(){
  state.matches=findDuplicates(state.signatures,state.overrides);
  state.possible=[];
- showResults();
+ showResults();workspace.syncLedger();
 }
 function markManual(page,original,confirmed){
  state.overrides.set(page,confirmed?{type:'confirm',original}:{type:'reject'});classify();
@@ -131,6 +137,7 @@ function initVirtualPages(run){
 }
 async function scan(){
  if(!state.pdf)return;
+ state.scanComplete=false;workspace.setBusy(true);
  const started=performance.now();
  const run=++state.run;pageObserver?.disconnect();cards.clear();
  state.signatures=[];state.matches=[];state.possible=[];state.ocrReady=false;
@@ -145,25 +152,25 @@ async function scan(){
    const mini=await renderPage(page,Math.min(.4,290/v.width));
    const text=await page.getTextContent();
    const sig=signature(mini,textTokens(text));
-   sig.ocr=text.items.map(item=>item.str||'').join(' ');
+   sig.ocr=text.items.map(item=>(item.str||'')+(item.hasEOL?'\n':' ')).join('');
    sig.embedded=sig.ocr.trim().length>80;
    state.signatures.push(sig);
    mini.width=0;mini.height=0;
    // Do not wait for animation frames: they pause when the tab is hidden.
-  }catch(err){if(run!==state.run)return;status('Could not prepare page '+n+': '+err.message);$('rescan').disabled=false;console.error(err);return;}
+  }catch(err){if(run!==state.run)return;status('Could not prepare page '+n+': '+err.message);$('rescan').disabled=false;workspace.setBusy(false);console.error(err);return;}
  }
  if(run!==state.run)return;
  await recognizeAll(run);
  if(run!==state.run)return;
- classify();
+ state.scanComplete=true;classify();workspace.setBusy(false);
  status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+'s. Review matches before export.');
 }
 async function downloadClean(){
  if(!state.pdf||!state.bytes)return;
  const duplicates=[...new Set(state.matches.map(m=>m.page))].sort((a,b)=>a-b);
- if(!duplicates.length){status('No confirmed duplicates to remove. Source PDF is already the clean version.');return;}
+ if(!duplicates.length){downloadAll();return;}
  const shown=duplicates.length<=16?duplicates.join(', '):duplicates.slice(0,16).join(', ')+', …';
- const ok=confirm('Create a NEW PDF without '+duplicates.length+' marked duplicate page(s)?\\nPages to remove: '+shown+'\n\nThe original PDF will not be changed. Please verify these matches first.');
+ const ok=confirm('Create a NEW PDF without '+duplicates.length+' confirmed duplicate page(s)?\\nPages to remove: '+shown+'\n\nThe original PDF will not be changed. Please verify these matches first.');
  if(!ok)return;
  const button=$('export');button.disabled=true;
  try{
@@ -180,4 +187,21 @@ async function downloadClean(){
 }
 async function recognizeAll(run){
  return runOcr(run,{state,status,Tesseract:globalThis.Tesseract,chrome,navigator,renderPage});
+}
+
+function downloadAll(){
+ if(!state.bytes)return;
+ const url=URL.createObjectURL(new Blob([state.bytes.slice()],{type:'application/pdf'}));
+ const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\.pdf$/i,'')+'-all-pages.pdf';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);
+ status('All-pages PDF downloaded without added marks.');
+}
+
+async function downloadBills(pages){
+ if(!state.bytes)return;
+ try{
+  const bytes=await createSelectedPdf(globalThis.PDFLib.PDFDocument,state.bytes,pages);
+  const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+  const a=document.createElement('a');a.href=url;a.download=state.name.replace(/\.pdf$/i,'')+'-bills-receipts.pdf';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);
+  $('copyStatus').textContent='Bills and receipts PDF downloaded. Other documents excluded.';
+ }catch(error){$('copyStatus').textContent='Bill PDF export failed: '+error.message;}
 }

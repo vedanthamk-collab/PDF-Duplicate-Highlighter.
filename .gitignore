@@ -4,3 +4,4 @@ assets/*.traineddata
 *.pdf
 vendor/
 benchmarks/pdf-baseline.mjs
+tmp/
