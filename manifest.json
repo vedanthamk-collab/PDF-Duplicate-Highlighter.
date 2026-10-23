@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Duplicate Highlighter",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Merge PDFs and images, find duplicate pages, and review bill expenses locally.",
   "permissions": [
     "activeTab",

@@ -27,3 +27,8 @@ test('native messaging correlates replies and cancellation without accepting sta
  const reader=connectLocalReader({connectNative:()=>port});const pending=reader.request({type:'hello'});receive({id:sent[0].id,result:{available:true}});assert.deepEqual(await pending,{available:true});
  const controller=new AbortController(),cancelled=reader.request({type:'read',image:'synthetic'},controller.signal);controller.abort();await assert.rejects(cancelled,/cancelled/);assert.equal(sent.at(-1).type,'cancel');receive({id:sent[1].id,result:sample()});reader.close();
 });
+test('a stalled native page request is cancelled on its deadline rather than blocking indefinitely',async()=>{
+ let disconnect;const sent=[],port={onMessage:{addListener:()=>{}},onDisconnect:{addListener:f=>disconnect=f},postMessage:m=>sent.push(m),disconnect:()=>disconnect()};
+ const reader=connectLocalReader({connectNative:()=>port},{timeoutMs:5});
+ await assert.rejects(reader.request({type:'read',image:'synthetic'}),/page limit/);assert.equal(sent.at(-1).type,'cancel');reader.close();
+});

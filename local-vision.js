@@ -17,13 +17,13 @@ export function normalizeVision(value){
  }
  return {documentType:value.documentType,billNo:value.billNo.trim(),billDate,billType:value.billType,currency:value.currency,referenceNo:value.referenceNo.trim(),amountCents,serviceReceipt:value.documentType==='Receipt'&&value.serviceReceipt,remarks:'',issues,advisories,pageMarker:null,localAI:true};
 }
-export function connectLocalReader(runtime){
+export function connectLocalReader(runtime,{timeoutMs=120000}={}){
  let port;try{port=runtime.connectNative('com.pdfclaims.reader');}catch{return null;}
  const pending=new Map();let sequence=0;
  port.onMessage.addListener(message=>{const task=pending.get(message.id);if(!task)return;pending.delete(message.id);clearTimeout(task.timer);message.error?task.reject(Error(message.error)):task.resolve(message.result);});
  port.onDisconnect.addListener(()=>{const reason=runtime.lastError?.message||'Local reader disconnected';for(const task of pending.values()){clearTimeout(task.timer);task.reject(Error(reason));}pending.clear();});
  return {request(payload,signal){return new Promise((resolve,reject)=>{const id=++sequence;
-  const timer=setTimeout(()=>{pending.delete(id);port.postMessage({id,type:'cancel'});reject(Error('Local reader timed out'));},240000);
+  const timer=setTimeout(()=>{pending.delete(id);signal?.removeEventListener('abort',cancel);try{port.postMessage({id,type:'cancel'});}catch{}reject(Error('Local reader reached the 2-minute page limit'));},timeoutMs);
   const cancel=()=>{if(!pending.has(id))return;pending.delete(id);clearTimeout(timer);port.postMessage({id,type:'cancel'});reject(Error('Local reading cancelled'));};
   pending.set(id,{resolve:value=>{signal?.removeEventListener('abort',cancel);resolve(value);},reject:error=>{signal?.removeEventListener('abort',cancel);reject(error);},timer});
   if(signal?.aborted){cancel();return;}signal?.addEventListener('abort',cancel,{once:true});

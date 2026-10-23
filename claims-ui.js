@@ -47,6 +47,7 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload,onCle
   $('billSummary').textContent=sum.included+' expenses included · '+sum.needsReview+' need review'+(sum.invalid.length?' · '+sum.invalid.length+' invalid amounts excluded':'')+' · '+rows.filter(r=>r.documentType==='Other').length+' documents excluded. Receipts require review and explicit inclusion; linked payments are excluded.';
   const weakPages=(getState().signatures||[]).filter(s=>s.billingNeedsReview).length;
   const missingTotals=rows.some(r=>r.documentType!=='Other'&&r.amountCents===null);
+  if(getState().billAIpending)$('billSummary').textContent+=' AI still reading '+getState().billAIpending+' pages; subtotal is provisional.';
   if(weakPages||missingTotals||sum.needsReview){
    $('billSummary').textContent+=' Calculation incomplete: '+(weakPages?weakPages+' pages have uncertain OCR.':'verify missing totals.');
    if(!sum.included)$('billTotal').textContent='Calculation incomplete — review required';
@@ -89,7 +90,9 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload,onCle
  $('exportBills').onclick=()=>onBillsDownload(rows.filter(r=>r.documentType!=='Other').flatMap(r=>r.pages));
  $('addBill').onclick=()=>{const row={id:'manual-'+crypto.randomUUID(),pages:[],fileName:'Manual entry',billNo:'',referenceNo:'',billDate:'',billType:'Other',amountCents:null,currency:'INR',documentType:'Bill',remarks:'',included:false,reviewed:false,issues:['Manual entry: check amount and inclusion']};manual.push(row);rows.push(row);render();};
  $('copyBills').onclick=async()=>{
-  const copiedRevision=revision,data=billTableData(rows),text=tableToTsv(data);
+  const copiedRevision=revision,data=billTableData(rows);
+  if(getState().billAIpending)data.push(['','','AI still reading','','','Provisional subtotal','','',getState().billAIpending+' pages pending']);
+  const text=tableToTsv(data);
   try{
    if(typeof ClipboardItem!=='undefined'&&navigator.clipboard.write)await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([text],{type:'text/plain'}),'text/html':new Blob([tableToHtml(data)],{type:'text/html'})})]);
    else await navigator.clipboard.writeText(text);
