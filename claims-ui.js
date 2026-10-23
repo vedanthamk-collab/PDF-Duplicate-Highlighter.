@@ -2,9 +2,9 @@ import {mergeDocuments,jpegNeedsOrientation} from './documents.js';
 import {buildBillLedger,summarizeBills,moneyToCents,formatMoney,billTableData,tableToTsv,tableToHtml} from './billing.js';
 const $=id=>document.getElementById(id);
 export function initClaims({getState,onMerged,showDocument,onBillsDownload,onClear}){
- const files=[],edits=new Map();let rows=[],manual=[],busy=false,tab='documents',revision=0,billingRequested=false;
+ const files=[],edits=new Map();let rows=[],manual=[],busy=false,tab='documents',revision=0;
  function setTab(value){tab=value;$('workspaceMain').className=value==='bills'?'billing-mode':'';$('stage').hidden=value!=='documents';$('billView').hidden=value!=='bills';$('documentsTab').setAttribute('aria-selected',String(value==='documents'));$('billsTab').setAttribute('aria-selected',String(value==='bills'));}
- $('documentsTab').onclick=()=>setTab('documents');$('billsTab').onclick=()=>{billingRequested=true;syncLedger();setTab('bills');};
+ $('documentsTab').onclick=()=>setTab('documents');$('billsTab').onclick=()=>setTab('bills');
  function queue(){
   $('fileQueue').replaceChildren();$('queueCount').textContent=files.length+' file'+(files.length===1?'':'s');
   files.forEach((file,index)=>{
@@ -75,11 +75,11 @@ export function initClaims({getState,onMerged,showDocument,onBillsDownload,onCle
   $('billEmpty').hidden=rows.some(r=>r.documentType!=='Other');summary();
  }
  function syncLedger(){
-  const s=getState();if(!billingRequested||!s.scanComplete)return;
+  const s=getState();if(!s.scanComplete)return;
   rows=buildBillLedger(s.signatures,s.provenance,s.matches).map(row=>({...row,...(edits.get(row.id)||{})})).concat(manual);
   $('billCount').textContent=rows.filter(r=>r.documentType!=='Other').length;revision++;render();
  }
- function resetLedger(){billingRequested=false;edits.clear();manual=[];rows=[];revision++;render();setTab('documents');}
+ function resetLedger(){edits.clear();manual=[];rows=[];revision++;render();setTab('documents');}
  $('exportBills').onclick=()=>onBillsDownload(rows.filter(r=>r.documentType!=='Other').flatMap(r=>r.pages));
  $('addBill').onclick=()=>{const row={id:'manual-'+crypto.randomUUID(),pages:[],fileName:'Manual entry',billNo:'',referenceNo:'',billDate:'',billType:'Other',amountCents:null,currency:'INR',documentType:'Bill',remarks:'',included:false,reviewed:false,issues:['Manual entry: check amount and inclusion']};manual.push(row);rows.push(row);render();};
  $('copyBills').onclick=async()=>{

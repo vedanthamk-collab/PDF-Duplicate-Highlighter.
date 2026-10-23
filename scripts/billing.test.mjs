@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {moneyToCents,buildBillLedger,summarizeBills,billTableData,tableToTsv,tableToHtml} from '../billing.js';
+
+test('remarks stay concise and copied review issues remain separate',()=>{
+ const rows=buildBillLedger([{ocr:'Receipt No: R-1\nAgainst Bill No: B-1\nAmount Paid: 100'}]);
+ assert.equal(rows[0].remarks,'Unmatched receipt');
+ const data=billTableData(rows);
+ assert.equal(data[1][5],'Unmatched receipt');
+ assert.equal(data[0][8],'Review issues');assert.match(data[1][8],/Missing date/);
+ assert.equal(summarizeBills(rows).totalCents,0);
+});
 const bill=(extra='',no='INV-001')=>'Central Pharmacy\nTax Invoice\nInvoice No: '+no+'\nInvoice Date: 23/10/2026\nGrand Total: INR 1,250.50\n'+extra;
 const sig=text=>({ocr:text});
 test('money uses integer paise and validates Indian/Western grouping without guessing',()=>{
