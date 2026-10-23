@@ -39,8 +39,8 @@ async function openPdf(data,name,provenance=[]){
  catch(err){if(run!==state.run)return;status('Unable to load PDF: '+err.message);$('stats').textContent='Could not read PDF';console.error(err);}
  finally{workspace.setBusy(false);}
 }
-async function renderPage(page,scale){
- const v=page.getViewport({scale});const c=document.createElement('canvas');c.width=Math.ceil(v.width);c.height=Math.ceil(v.height);
+async function renderPage(page,scale,rotation=0){
+ const v=page.getViewport({scale,rotation:((page.rotate||0)+rotation+360)%360});const c=document.createElement('canvas');c.width=Math.ceil(v.width);c.height=Math.ceil(v.height);
  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
  await page.render({canvasContext:ctx,viewport:v}).promise;return c;
 }

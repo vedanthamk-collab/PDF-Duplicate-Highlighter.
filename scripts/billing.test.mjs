@@ -12,6 +12,34 @@ test('remarks stay concise and copied review issues remain separate',()=>{
 });
 const bill=(extra='',no='INV-001')=>'Central Pharmacy\nTax Invoice\nInvoice No: '+no+'\nInvoice Date: 23/10/2026\nGrand Total: INR 1,250.50\n'+extra;
 const sig=text=>({ocr:text});
+
+test('claim checklist is not a bill and its cancelled cheque is not an expense warning',()=>{
+ const [row]=buildBillLedger([sig('CLAIM FORM\nDETAILS OF BILLS ENCLOSED\nHospital Main Bill\nPharmacy Bill\nBill No Date Amount\nCancelled blank cheque\nClaim_form.pdf - Page 2/3')]);
+ assert.equal(row.documentType,'Other');assert.equal(row.included,false);
+});
+test('standalone invoice number and repeated date punctuation are supported without rounding',()=>{
+ const [row]=buildBillLedger([sig('Example Medical\nINVOICE\nNo. 81\nDate :: 16/06/2026\nNet Amount: 1320.57')]);
+ assert.equal(row.billNo,'81');assert.equal(row.billDate,'16/06/2026');assert.equal(row.amountCents,132057);assert.equal(row.included,true);
+});
+test('billing recovery is separate from matching text and uncertain OCR cannot auto-add expenses',()=>{
+ const original='unreadable sideways page';
+ const signature={ocr:original,billingOcr:'INVOICE\nNo. 88\nDate: 16/06/2026\nTotal: 473',billingNeedsReview:true};
+ const [row]=buildBillLedger([signature]);assert.equal(row.billNo,'88');assert.equal(row.amountCents,47300);assert.equal(row.included,false);assert.match(row.issues.join(' '),/OCR uncertain/);assert.equal(signature.ocr,original);
+});
+test('copied total is explicitly incomplete when a bill amount cannot be read',()=>{
+ const rows=buildBillLedger([sig('INVOICE\nNo. 81\nDate: 16/06/2026\nTOTAL illegible')]);
+ const total=billTableData(rows).at(-1);assert.equal(total[2],'Included bill subtotal');assert.match(total[8],/incomplete/);
+});
+test('cash credit memo is recognized while stray OCR dollar does not change an INR invoice currency',()=>{
+ const [row]=buildBillLedger([sig('Cash/Credit Memo\nB.No. 81\nDate: 16/06/2026\nTotal | 2100/-\nCGST 0 SGST 0\nOCR noise $8')]);
+ assert.equal(row.documentType,'Bill');assert.equal(row.billNo,'81');assert.equal(row.currency,'INR');assert.equal(row.amountCents,210000);
+});
+test('standalone service receipt requires explicit inclusion and review; linked payment never counts twice',()=>{
+ const rows=buildBillLedger([sig('OPD RECEIPT\nReceipt No: SERVICE-1\nDate: 16/06/2026\nTotal: 7000')]);
+ assert.equal(summarizeBills(rows).totalCents,0);rows[0].included=true;assert.equal(summarizeBills(rows).totalCents,0);
+ rows[0].reviewed=true;assert.equal(summarizeBills(rows).totalCents,700000);
+ rows[0].linkedBillId='separate-invoice';assert.equal(summarizeBills(rows).totalCents,0);
+});
 test('money uses integer paise and validates Indian/Western grouping without guessing',()=>{
  for(const [text,value] of [['1,250.50',125050],['1,23,456.78',12345678],['Rs. 100/-',10000],['0.01',1],['42',4200]])assert.equal(moneyToCents(text),value,text);
  for(const text of ['',null,'1O0','1,2,3','-1','1.234','NaN','Infinity','=1+1'])assert.equal(moneyToCents(text),null,String(text));

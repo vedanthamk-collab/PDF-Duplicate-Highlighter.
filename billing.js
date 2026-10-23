@@ -11,21 +11,28 @@ const moneyPattern='(?:INR|Rs\\.?|₹|USD|EUR|GBP|\\$|€|£)?\\s*(\\d[\\d,]*(?:
 function field(text,label){
  const match=text.match(new RegExp('\\b(?:'+label+')\\s*(?:(?:no\\.?|number|#)\\s*[:#.-]?|:)\\s*([A-Z0-9][A-Z0-9/._-]*)','i'));
  const value=match?.[1]||'';
- return /^(?:date|no|number|amount|total|details|of|to)$/i.test(value)?'':value;
+ return /^(?:date|no|number|amount|total|details|of|to)(?:$|_)/i.test(value)?'':value;
 }
 function extract(text){
- const bill=/\b(tax invoice|invoice|(?:final |hospital |medical |pharmacy )?bill\s*(?:no\.?|number|#|:)|cash memo)\b/i.test(text);
- const receipt=!!field(text,'receipt')||/^\s*(?:payment\s+)?receipt\b/im.test(text)||(!bill&&/\b(payment received|amount received|received with thanks)\b/i.test(text));
- const documentType=receipt?'Receipt':bill?'Bill':'Other';
+ // Export footers name source files, not the document printed on the page.
+ text=text.replace(/^.*\.pdf\s*(?:-\s*Page\b.*|\([^\n]*\))\s*$/gim,'');
+ const nonBill=/\b(?:claim form|guidance for filling|details of bills enclosed|claim documents submitted|bank account verification)\b/i.test(text);
+ const financialLayout=(/\bnet amount\b/i.test(text)&&/\b(?:GSTIN|CGST|SGST|Qty|admission|room\s*rent)\b/i.test(text))||(/\btotal\s*[:=]?\s*(?:Rs\.?\s*)?\d/i.test(text)&&/\bconcessions\b/i.test(text)&&/\bpaid\b/i.test(text));
+ const bill=!nonBill&&(/\b(tax invoice|invoice|cash bill|(?:final |hospital |medical |pharmacy )?bill\s*(?:no\.?|number|#|:)|cash\s*(?:\/\s*credit\s*)?memo)\b/i.test(text)||financialLayout||/\bb\s*\.\s*no\s*\./i.test(text));
+ const receipt=!!field(text,'receipt')||/^\s*(?:(?:payment|OPD|cash)\s+)?receipt\b/im.test(text)||(!bill&&/\b(payment received|amount received|received with thanks)\b/i.test(text));
+ const documentType=nonBill?'Other':receipt?'Receipt':bill?'Bill':'Other';
  const referenceNo=field(text,'(?:against\\s+)?(?:invoice|bill)')||field(text,'cash\\s+memo');
- const billNo=documentType==='Receipt'?(field(text,'receipt')||referenceNo):referenceNo;
- const dateMatch=text.match(/\b(?:(?:bill|invoice|receipt)\s+date|date)\s*[:.-]?\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.](?:\d{1,2}|[A-Za-z]{3,9})[-/.]\d{2,4})\b/i);
+ const rawNo=bill?text.match(/^[ \t]*(?:b[ \t]*\.[ \t]*)?no\.?[ \t]*[:#.-]?[ \t]*([A-Z0-9][A-Z0-9/._-]*)/im)?.[1]||'':'';
+ const standaloneNo=/^(?:date|amount|total)(?:$|_)/i.test(rawNo)?'':rawNo;
+ const billNo=documentType==='Receipt'?(field(text,'receipt')||referenceNo):(referenceNo||standaloneNo);
+ const dateMatch=text.match(/\b(?:(?:bill|invoice|receipt)\s+date|date)\s*[:.-]*\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.](?:\d{1,2}|[A-Za-z]{3,9})[-/.]\d{2,4})\b/i);
  const billDate=dateMatch?.[1]||'';
- const currency=/\bUSD\b|\$/.test(text)?'USD':/\bEUR\b|€/.test(text)?'EUR':/\bGBP\b|£/.test(text)?'GBP':'INR';
- const labels=documentType==='Receipt'?['amount (?:received|paid)','paid amount','receipt amount','total amount','grand total']:['grand total','(?:total bill|invoice total|bill amount|net payable|amount payable|net amount|total amount)','(?<!sub[ -])\\btotal\\b'];
+ const indianCurrency=/\b(?:INR|Rupees|Rs\.?|GSTIN|CGST|SGST)\b|₹/i.test(text);
+ const currency=/\bUSD\b/.test(text)||(!indianCurrency&&/\$\s*\d/.test(text))?'USD':/\bEUR\b|€/.test(text)?'EUR':/\bGBP\b|£/.test(text)?'GBP':'INR';
+ const labels=documentType==='Receipt'?['amount (?:received|paid)','paid amount','receipt amount','total amount','grand total','(?<!sub[ -])\\btotal\\b']:['grand total','(?:total bill|invoice total|bill amount|net payable|amount payable|net amount|total amount)','(?<!sub[ -])\\btotal\\b'];
  let values=[];
  for(const label of labels){
-  const matches=[...text.matchAll(new RegExp('(?:'+label+')\\s*[:=.-]?\\s*'+moneyPattern,'gi'))];
+  const matches=[...text.matchAll(new RegExp('(?:'+label+')\\s*[:=.|)\\]-]*\\s*'+moneyPattern,'gi'))];
   values=[...new Set(matches.map(m=>moneyToCents(m[1])).filter(n=>n!==null))];
   if(values.length)break;
  }
@@ -47,7 +54,8 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
  const duplicates=new Set(matches.map(m=>m.page)),groups=[];
  signatures.forEach((sig,index)=>{
   const page=index+1;if(duplicates.has(page))return;
-  const text=sig.ocr||'',parsed=extract(text),source=provenance[index]||{fileName:'Document',sourceIndex:0,sourcePage:page};
+  const text=sig.billingOcr||sig.ocr||'',parsed=extract(text),source=provenance[index]||{fileName:'Document',sourceIndex:0,sourcePage:page};
+  if(sig.billingNeedsReview)parsed.issues.push('OCR uncertain: verify fields');
   const previous=groups.at(-1),mark=parsed.pageMarker,priorMark=previous?.lastMarker;
   const continuation=previous&&mark&&priorMark&&mark.total===priorMark.total&&mark.page===priorMark.page+1&&mark.page<=mark.total&&source.sourceIndex===previous.source.sourceIndex&&source.sourcePage===previous.lastSourcePage+1&&parsed.billNo&&parsed.billNo===previous.parsed.billNo&&parsed.billDate&&parsed.billDate===previous.parsed.billDate&&parsed.documentType===previous.parsed.documentType;
   if(continuation){previous.pages.push(page);previous.text+='\n'+text;previous.parsed=extract(previous.text);previous.lastMarker=mark;previous.lastSourcePage=source.sourcePage;}
@@ -72,10 +80,11 @@ export function buildBillLedger(signatures,provenance=[],matches=[]){
  }
  return rows;
 }
+export function countsAsExpense(row){return row.documentType==='Bill'||(row.documentType==='Receipt'&&row.reviewed&&!row.linkedBillId);}
 export function summarizeBills(rows){
  let totalCents=0,included=0;const invalid=[];
  for(const row of rows){
-  if(!row.included||row.documentType!=='Bill')continue;
+  if(!row.included||!countsAsExpense(row))continue;
   if(row.currency!=='INR'||!Number.isSafeInteger(row.amountCents)||row.amountCents<0){invalid.push(row.id);continue;}
   totalCents+=row.amountCents;included++;
  }
@@ -84,8 +93,9 @@ export function summarizeBills(rows){
 }
 export function billTableData(rows){
  const data=[['Bill no.','Bill date','Bill type','Bill amount','Type','Remarks','Included in bill total','Source pages','Review issues']];
- for(const r of rows.filter(r=>r.documentType!=='Other'))data.push([r.billNo,r.billDate,r.billType,r.amountCents===null?'':r.currency+' '+formatMoney(r.amountCents),r.documentType,r.remarks,r.included&&r.documentType==='Bill'&&r.currency==='INR'&&Number.isSafeInteger(r.amountCents)?'Yes':'No',r.pages.join(', '),r.reviewed?'':r.issues.join('; ')]);
- const sum=summarizeBills(rows);data.push(['','','Draft bill total','INR '+formatMoney(sum.totalCents),'','Bills only','','','']);return data;
+ for(const r of rows.filter(r=>r.documentType!=='Other'))data.push([r.billNo,r.billDate,r.billType,r.amountCents===null?'':r.currency+' '+formatMoney(r.amountCents),r.documentType,r.remarks,r.included&&countsAsExpense(r)&&r.currency==='INR'&&Number.isSafeInteger(r.amountCents)?'Yes':'No',r.pages.join(', '),r.reviewed?'':r.issues.join('; ')]);
+ const sum=summarizeBills(rows),incomplete=sum.needsReview>0||rows.some(r=>r.issues.some(i=>i.startsWith('OCR uncertain'))||(r.documentType!=='Other'&&r.amountCents===null));
+ data.push(['','',incomplete?'Included bill subtotal':'Draft bill total','INR '+formatMoney(sum.totalCents),'','Bills + reviewed standalone receipts','','',incomplete?'Calculation incomplete: review unread fields':'']);return data;
 }
 export function spreadsheetText(value){const text=String(value??'').replace(/[\t\r\n]+/g,' ');return /^[\s]*[=+@-]/.test(text)?"'"+text:text;}
 export function tableToTsv(data){return data.map(row=>row.map(spreadsheetText).join('\t')).join('\n');}

@@ -6,6 +6,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),dist=
 fs.rmSync(dist,{recursive:true,force:true});fs.mkdirSync(path.join(dist,'vendor'),{recursive:true});
 for(const f of ['manifest.json','popup.html','popup.css','popup.js','viewer.html','viewer.css','viewer.js','matcher.js','export.js','scanner.js','startup.js','pdf-source.js','documents.js','billing.js','claims-ui.js'])fs.copyFileSync(path.join(root,f),path.join(dist,f));
 fs.copyFileSync(path.join(root,'node_modules','pdf-lib','dist','pdf-lib.min.js'),path.join(dist,'vendor','pdf-lib.min.js'));
+fs.copyFileSync(path.join(root,'bill-ocr.js'),path.join(dist,'bill-ocr.js'));
 fs.writeFileSync(path.join(dist,'vendor','pdf.mjs'),backgroundSafePdfJs(fs.readFileSync(path.join(root,'node_modules','pdfjs-dist','build','pdf.mjs'),'utf8')));
 fs.copyFileSync(path.join(root,'node_modules','pdfjs-dist','build','pdf.worker.mjs'),path.join(dist,'vendor','pdf.worker.mjs'));
 
