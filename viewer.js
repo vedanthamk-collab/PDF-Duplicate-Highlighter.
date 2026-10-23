@@ -86,7 +86,7 @@ function showResults(){
   const reject=document.createElement('button');reject.className='small';reject.textContent='Not duplicate';reject.onclick=()=>markManual(m.page,m.original,false);
   box.append(go,confirm,reject);parent.append(box);
  }
- if(!state.matches.length&&!state.possible.length)parent.textContent='No duplicates found. Scans with changed content may require manual checking.';
+ if(!state.matches.length&&!state.possible.length)parent.textContent='No duplicates found. Review pages if needed.';
  renderMarks();$('rescan').disabled=false;$('export').disabled=false;
 }
 function renderMarks(){
@@ -156,7 +156,7 @@ async function scan(){
  await recognizeAll(run);
  if(run!==state.run)return;
  classify();
- status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+' seconds. Review the duplicates list before downloading the cleaned PDF.');
+ status('Analysis complete in '+((performance.now()-started)/1000).toFixed(1)+'s. Review matches before export.');
 }
 async function downloadClean(){
  if(!state.pdf||!state.bytes)return;
